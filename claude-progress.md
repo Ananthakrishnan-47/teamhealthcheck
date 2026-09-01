@@ -3,8 +3,8 @@
 ## Current State
 
 - **Branch:** feat/service-contract-ESP
-- **Last updated:** 2026-08-31
-- **Summary:** 28 files (22 new, 6 modified)
+- **Last updated:** 2026-09-01
+- **Summary:** 30 files (24 new, 6 modified)
 
 ## What to do next
 
@@ -27,6 +27,29 @@
   - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
   - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
   - ... (+12 more)
+  Modified:
+  - backend/cmd/api/main.go
+  - backend/domain/team/team.go
+  - backend/infrastructure/persistence/postgres/team_repository.go
+  - claude-progress.md
+  - frontend/app/admin/page.tsx
+  - frontend/lib/api/admin.ts
+
+
+### 2026-09-01T09:48:35Z
+- 30 files (24 new, 6 modified)
+  New:
+  - .claude
+  - .claude-session-head
+  - backend/application/services/organization_snapshot_filter.go
+  - backend/application/services/organization_snapshot_filter_test.go
+  - backend/application/services/organization_sync_service.go
+  - backend/domain/orgprovider/orgprovider.go
+  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.down.sql
+  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.up.sql
+  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
+  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
+  - ... (+14 more)
   Modified:
   - backend/cmd/api/main.go
   - backend/domain/team/team.go
