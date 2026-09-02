@@ -741,3 +741,90 @@ export function clearAdminCache(): void {
 export function clearAdminCacheKeys(...keys: string[]): void {
   keys.forEach((key) => adminCache.delete(key));
 }
+
+// ============================================================================
+// ORGANIZATION PROVIDER API METHODS
+// ============================================================================
+
+/**
+ * How the external organization-data provider is configured.
+ *
+ * The API token is deliberately absent: it is write-only and never returned.
+ */
+export interface OrganizationProviderSettings {
+  provider: string;
+  /** A token has been stored. */
+  configured: boolean;
+  /** The provider base URL is set in the backend environment. */
+  baseUrlConfigured: boolean;
+  /** A token encryption key is available to the backend. */
+  encryptionConfigured: boolean;
+  /** Every prerequisite is met, so a sync can run. */
+  readyToSync: boolean;
+  tokenUpdatedAt?: string;
+}
+
+/** A snapshot user that could not be imported, and why. */
+export interface SkippedProviderUser {
+  userId: string;
+  username: string;
+  hierarchyLevelId: string;
+  reason: string;
+}
+
+/** The outcome of one synchronization run. */
+export interface OrganizationSyncResult {
+  status: string;
+  teamsSynced: number;
+  usersSynced: number;
+  membershipsSynced: number;
+  membershipsRemoved: number;
+  healthChecksDisabled: number;
+  healthChecksEnabled: number;
+  usersSkipped: number;
+  skippedUsers?: SkippedProviderUser[];
+  managerLinksCleared: number;
+  teamLeadsCleared: number;
+  membershipsDiscarded: number;
+  startedAt: string;
+  completedAt: string;
+}
+
+/**
+ * Fetches organization provider configuration status
+ */
+export async function getOrganizationProviderSettings(): Promise<OrganizationProviderSettings> {
+  return createApiClient<OrganizationProviderSettings>(
+    `${API_BASE_URL}/api/v1/admin/settings/organization-provider`
+  );
+}
+
+/**
+ * Stores a new provider API token
+ *
+ * The token is encrypted by the backend before storage and is never readable again.
+ */
+export async function updateOrganizationProviderToken(
+  apiToken: string
+): Promise<{ message: string }> {
+  return createApiClient<{ message: string }>(
+    `${API_BASE_URL}/api/v1/admin/settings/organization-provider`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ apiToken }),
+    }
+  );
+}
+
+/**
+ * Triggers a manual organization sync
+ *
+ * Rewrites users, teams and memberships, so callers must clear the admin cache
+ * on success or the UI will keep serving pre-sync counts for up to two minutes.
+ */
+export async function syncOrganizationProvider(): Promise<OrganizationSyncResult> {
+  return createApiClient<OrganizationSyncResult>(
+    `${API_BASE_URL}/api/v1/admin/organization-provider/sync`,
+    { method: 'POST' }
+  );
+}

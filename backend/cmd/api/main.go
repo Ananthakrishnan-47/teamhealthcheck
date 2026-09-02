@@ -15,10 +15,12 @@ import (
 	"github.com/agopalakrishnan/teams360/backend/application/trends"
 	"github.com/agopalakrishnan/teams360/backend/infrastructure/email"
 	"github.com/agopalakrishnan/teams360/backend/infrastructure/persistence/postgres"
+	"github.com/agopalakrishnan/teams360/backend/infrastructure/provider/podiq"
 	"github.com/agopalakrishnan/teams360/backend/interfaces/api/middleware"
 	"github.com/agopalakrishnan/teams360/backend/interfaces/api/v1"
 	"github.com/agopalakrishnan/teams360/backend/pkg/logger"
 	"github.com/agopalakrishnan/teams360/backend/pkg/telemetry"
+	"github.com/agopalakrishnan/teams360/backend/pkg/tokencrypto"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-migrate/migrate/v4"
 	migratePostgres "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -158,6 +160,7 @@ func main() {
 	userRepo := postgres.NewUserRepository(db)
 	teamRepo := postgres.NewTeamRepository(db)
 	orgRepo := postgres.NewOrganizationRepository(db)
+	orgProviderRepo := postgres.NewOrganizationProviderRepository(db)
 
 	// Initialize services
 	trendsService := trends.NewService(db)
@@ -185,6 +188,25 @@ func main() {
 	// Initialize password reset service
 	passwordResetRepo := postgres.NewPasswordResetRepository(db)
 	passwordResetService := services.NewPasswordResetService(passwordResetRepo, userRepo, emailSender)
+
+	// Initialize organization provider sync (external org-data source).
+	// Each dependency is optional: a missing encryption key or provider URL
+	// leaves sync disabled and reported as such, rather than failing startup.
+	var tokenCipher services.TokenCipher
+	var tokenEncrypter v1.TokenEncrypter
+	if cipher := tokencrypto.Load(); cipher != nil {
+		tokenCipher = cipher
+		tokenEncrypter = cipher
+		log.Info("provider token encryption configured")
+	} else {
+		log.Info("No token encryption key configured, organization provider sync disabled")
+	}
+
+	podiqClient := podiq.NewClient(podiq.LoadConfig())
+	if podiqClient.Configured() {
+		log.Info("PodIQ organization provider configured")
+	}
+	orgSyncService := services.NewOrganizationSyncService(orgProviderRepo, podiqClient, tokenCipher, userRepo, teamRepo)
 
 	// Initialize router (use gin.New() instead of gin.Default() to disable default logger)
 	router := gin.New()
@@ -218,6 +240,7 @@ func main() {
 	v1.SetupUserRoutes(router, db, jwtService)          // User routes with JWT + same-user-or-manager
 	v1.SetupProtectedUserRoutes(router, db, jwtService) // Protected routes requiring JWT
 	v1.SetupAdminRoutes(router, orgRepo, userRepo, teamRepo, jwtService)
+	v1.SetupOrganizationProviderRoutes(router, orgProviderRepo, orgSyncService, tokenEncrypter, jwtService)
 	v1.SetupPasswordResetRoutes(router, passwordResetService, userRepo)
 
 	// Static file serving for frontend SPA

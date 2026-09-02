@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import HierarchyConfig from "@/components/HierarchyConfig";
 import DimensionConfig from "@/components/DimensionConfig";
+import DataProviderConfig from "@/components/DataProviderConfig";
 import SupervisorChainModal from "@/components/SupervisorChainModal";
 import TeamMembersModal from "@/components/TeamMembersModal";
 
@@ -1797,6 +1798,10 @@ export default function AdminPage() {
                     </select>
                   </div>
                 </div>
+              </div>
+
+              <div data-testid="data-provider-settings">
+                <DataProviderConfig />
               </div>
 
               {settingsError && (
