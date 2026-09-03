@@ -3,8 +3,8 @@
 ## Current State
 
 - **Branch:** feat/service-contract-ESP
-- **Last updated:** 2026-09-02
-- **Summary:** 31 files (25 new, 6 modified)
+- **Last updated:** 2026-09-03
+- **Summary:** 31 files (21 new, 6 modified, 4 deleted); 1 commits: WIP: organization-provider sync (podiq client, token encryption, admin settings) - not final
 
 ## What to do next
 
@@ -141,6 +141,34 @@
   - claude-progress.md
   - frontend/app/admin/page.tsx
   - frontend/lib/api/admin.ts
+
+
+### 2026-09-03T08:31:16Z
+- 31 files (21 new, 6 modified, 4 deleted); 1 commits: WIP: organization-provider sync (podiq client, token encryption, admin settings) - not final
+  New:
+  - backend/application/services/organization_snapshot_filter.go
+  - backend/application/services/organization_snapshot_filter_test.go
+  - backend/application/services/organization_sync_service.go
+  - backend/domain/orgprovider/orgprovider.go
+  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.down.sql
+  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.up.sql
+  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
+  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
+  - backend/infrastructure/persistence/postgres/organization_provider_repository.go
+  - backend/infrastructure/provider/podiq/client.go
+  - ... (+11 more)
+  Modified:
+  - backend/cmd/api/main.go
+  - backend/domain/team/team.go
+  - backend/infrastructure/persistence/postgres/team_repository.go
+  - claude-progress.md
+  - frontend/app/admin/page.tsx
+  - frontend/lib/api/admin.ts
+  Deleted:
+  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
+  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
+  - backend/pkg/tokencrypto/tokencrypto.go
+  - backend/pkg/tokencrypto/tokencrypto_test.go
 
 ## Past Sessions
 
