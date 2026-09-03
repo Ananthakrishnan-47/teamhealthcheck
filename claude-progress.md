@@ -4,7 +4,7 @@
 
 - **Branch:** feat/service-contract-ESP
 - **Last updated:** 2026-09-03
-- **Summary:** 31 files (21 new, 6 modified, 4 deleted); 1 commits: WIP: organization-provider sync (podiq client, token encryption, admin settings) - not final
+- **Summary:** 25 files (7 new, 14 modified, 4 deleted)
 
 ## What to do next
 
@@ -13,157 +13,28 @@
 ## Session Log
 
 
-### 2026-09-02T08:25:56Z
-- 31 files (25 new, 6 modified)
+### 2026-09-03T10:01:23Z
+- 25 files (7 new, 14 modified, 4 deleted)
   New:
   - .claude
   - .claude-session-head
-  - backend/application/services/organization_snapshot_filter.go
-  - backend/application/services/organization_snapshot_filter_test.go
-  - backend/application/services/organization_sync_service.go
-  - backend/domain/orgprovider/orgprovider.go
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.up.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
-  - ... (+15 more)
+  - backend/domain/orgprovider/orgprovider_test.go
+  - backend/response.json
+  - scripts/dev-podiq-fake/.claude
+  - scripts/dev-podiq-fake/payload.json
+  - scripts/dev-podiq-fake/server.py
   Modified:
-  - backend/cmd/api/main.go
-  - backend/domain/team/team.go
-  - backend/infrastructure/persistence/postgres/team_repository.go
-  - claude-progress.md
-  - frontend/app/admin/page.tsx
-  - frontend/lib/api/admin.ts
-
-
-### 2026-09-02T08:27:16Z
-- 31 files (25 new, 6 modified)
-  New:
-  - .claude
-  - .claude-session-head
-  - backend/application/services/organization_snapshot_filter.go
-  - backend/application/services/organization_snapshot_filter_test.go
   - backend/application/services/organization_sync_service.go
-  - backend/domain/orgprovider/orgprovider.go
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.up.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
-  - ... (+15 more)
-  Modified:
   - backend/cmd/api/main.go
-  - backend/domain/team/team.go
-  - backend/infrastructure/persistence/postgres/team_repository.go
-  - claude-progress.md
-  - frontend/app/admin/page.tsx
-  - frontend/lib/api/admin.ts
-
-
-### 2026-09-02T08:48:07Z
-- 31 files (25 new, 6 modified)
-  New:
-  - .claude
-  - .claude-session-head
-  - backend/application/services/organization_snapshot_filter.go
-  - backend/application/services/organization_snapshot_filter_test.go
-  - backend/application/services/organization_sync_service.go
   - backend/domain/orgprovider/orgprovider.go
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.up.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
-  - ... (+15 more)
-  Modified:
-  - backend/cmd/api/main.go
-  - backend/domain/team/team.go
-  - backend/infrastructure/persistence/postgres/team_repository.go
-  - claude-progress.md
-  - frontend/app/admin/page.tsx
-  - frontend/lib/api/admin.ts
-
-
-### 2026-09-02T09:21:38Z
-- 9 files (3 new, 6 modified)
-  New:
-  - .claude
-  - payload.json
-  - server.py
-  Modified:
-  - backend/cmd/api/main.go
-  - backend/domain/team/team.go
-  - backend/infrastructure/persistence/postgres/team_repository.go
-  - claude-progress.md
-  - frontend/app/admin/page.tsx
-  - frontend/lib/api/admin.ts
-
-
-### 2026-09-02T09:21:49Z
-- 31 files (25 new, 6 modified)
-  New:
-  - .claude
-  - .claude-session-head
-  - backend/application/services/organization_snapshot_filter.go
-  - backend/application/services/organization_snapshot_filter_test.go
-  - backend/application/services/organization_sync_service.go
-  - backend/domain/orgprovider/orgprovider.go
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.up.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
-  - ... (+15 more)
-  Modified:
-  - backend/cmd/api/main.go
-  - backend/domain/team/team.go
-  - backend/infrastructure/persistence/postgres/team_repository.go
-  - claude-progress.md
-  - frontend/app/admin/page.tsx
-  - frontend/lib/api/admin.ts
-
-
-### 2026-09-02T09:22:02Z
-- 31 files (25 new, 6 modified)
-  New:
-  - .claude
-  - .claude-session-head
-  - backend/application/services/organization_snapshot_filter.go
-  - backend/application/services/organization_snapshot_filter_test.go
-  - backend/application/services/organization_sync_service.go
-  - backend/domain/orgprovider/orgprovider.go
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.up.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
-  - ... (+15 more)
-  Modified:
-  - backend/cmd/api/main.go
-  - backend/domain/team/team.go
-  - backend/infrastructure/persistence/postgres/team_repository.go
-  - claude-progress.md
-  - frontend/app/admin/page.tsx
-  - frontend/lib/api/admin.ts
-
-
-### 2026-09-03T08:31:16Z
-- 31 files (21 new, 6 modified, 4 deleted); 1 commits: WIP: organization-provider sync (podiq client, token encryption, admin settings) - not final
-  New:
-  - backend/application/services/organization_snapshot_filter.go
-  - backend/application/services/organization_snapshot_filter_test.go
-  - backend/application/services/organization_sync_service.go
-  - backend/domain/orgprovider/orgprovider.go
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000021_add_team_health_check_enabled.up.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
-  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
   - backend/infrastructure/persistence/postgres/organization_provider_repository.go
   - backend/infrastructure/provider/podiq/client.go
-  - ... (+11 more)
-  Modified:
-  - backend/cmd/api/main.go
-  - backend/domain/team/team.go
-  - backend/infrastructure/persistence/postgres/team_repository.go
-  - claude-progress.md
-  - frontend/app/admin/page.tsx
-  - frontend/lib/api/admin.ts
+  - backend/infrastructure/provider/podiq/client_test.go
+  - backend/interfaces/api/v1/organization_provider_handler.go
+  - backend/interfaces/api/v1/organization_provider_routes.go
+  - backend/interfaces/dto/organization_provider_dto.go
+  - backend/tests/integration/organization_provider_sync_test.go
+  - ... (+4 more)
   Deleted:
   - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
   - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
@@ -194,4 +65,8 @@
 
 ### Session 2026-09-02 (2 entries)
 - 9 files (3 new, 6 modified)
+
+
+### Session 2026-09-03 (7 entries)
+- 31 files (21 new, 6 modified, 4 deleted); 1 commits: WIP: organization-provider sync (podiq client, token encryption, admin settings) - not final
 
