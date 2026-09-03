@@ -4,7 +4,7 @@
 
 - **Branch:** feat/service-contract-ESP
 - **Last updated:** 2026-09-03
-- **Summary:** 25 files (7 new, 14 modified, 4 deleted)
+- **Summary:** 21 files (3 new, 14 modified, 4 deleted)
 
 ## What to do next
 
@@ -23,6 +23,31 @@
   - scripts/dev-podiq-fake/.claude
   - scripts/dev-podiq-fake/payload.json
   - scripts/dev-podiq-fake/server.py
+  Modified:
+  - backend/application/services/organization_sync_service.go
+  - backend/cmd/api/main.go
+  - backend/domain/orgprovider/orgprovider.go
+  - backend/infrastructure/persistence/postgres/organization_provider_repository.go
+  - backend/infrastructure/provider/podiq/client.go
+  - backend/infrastructure/provider/podiq/client_test.go
+  - backend/interfaces/api/v1/organization_provider_handler.go
+  - backend/interfaces/api/v1/organization_provider_routes.go
+  - backend/interfaces/dto/organization_provider_dto.go
+  - backend/tests/integration/organization_provider_sync_test.go
+  - ... (+4 more)
+  Deleted:
+  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.down.sql
+  - backend/infrastructure/persistence/postgres/migrations/000022_create_organization_provider_credentials.up.sql
+  - backend/pkg/tokencrypto/tokencrypto.go
+  - backend/pkg/tokencrypto/tokencrypto_test.go
+
+
+### 2026-09-03T11:18:16Z
+- 21 files (3 new, 14 modified, 4 deleted)
+  New:
+  - .claude
+  - payload.json
+  - server.py
   Modified:
   - backend/application/services/organization_sync_service.go
   - backend/cmd/api/main.go
