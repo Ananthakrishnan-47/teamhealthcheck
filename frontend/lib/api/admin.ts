@@ -747,21 +747,19 @@ export function clearAdminCacheKeys(...keys: string[]): void {
 // ============================================================================
 
 /**
- * How the external organization-data provider is configured.
+ * Whether the external organization-data provider is configured.
  *
- * The API token is deliberately absent: it is write-only and never returned.
+ * There is no token field: the provider credential lives only in the
+ * backend's environment configuration, never in the database or this response.
  */
 export interface OrganizationProviderSettings {
   provider: string;
-  /** A token has been stored. */
-  configured: boolean;
-  /** The provider base URL is set in the backend environment. */
+  /** DATA_PROVIDER_BASE_URL is set on the backend and passed construction-time validation. */
   baseUrlConfigured: boolean;
-  /** A token encryption key is available to the backend. */
-  encryptionConfigured: boolean;
+  /** DATA_PROVIDER_API_TOKEN is set on the backend. */
+  tokenConfigured: boolean;
   /** Every prerequisite is met, so a sync can run. */
   readyToSync: boolean;
-  tokenUpdatedAt?: string;
 }
 
 /** A snapshot user that could not be imported, and why. */
@@ -781,6 +779,10 @@ export interface OrganizationSyncResult {
   membershipsRemoved: number;
   healthChecksDisabled: number;
   healthChecksEnabled: number;
+  usersDeleted: number;
+  teamsDeleted: number;
+  /** Action items removed as a side effect of the deletions above (cascaded, not held back). */
+  actionItemsDeleted: number;
   usersSkipped: number;
   skippedUsers?: SkippedProviderUser[];
   managerLinksCleared: number;
@@ -791,28 +793,16 @@ export interface OrganizationSyncResult {
 }
 
 /**
- * Fetches organization provider configuration status
+ * Fetches organization provider configuration readiness.
+ *
+ * There is no token field anywhere in this response: the provider credential
+ * lives only in the backend's environment configuration
+ * (DATA_PROVIDER_BASE_URL / DATA_PROVIDER_API_TOKEN) and is never entered,
+ * stored, or displayed through this UI.
  */
 export async function getOrganizationProviderSettings(): Promise<OrganizationProviderSettings> {
   return createApiClient<OrganizationProviderSettings>(
     `${API_BASE_URL}/api/v1/admin/settings/organization-provider`
-  );
-}
-
-/**
- * Stores a new provider API token
- *
- * The token is encrypted by the backend before storage and is never readable again.
- */
-export async function updateOrganizationProviderToken(
-  apiToken: string
-): Promise<{ message: string }> {
-  return createApiClient<{ message: string }>(
-    `${API_BASE_URL}/api/v1/admin/settings/organization-provider`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({ apiToken }),
-    }
   );
 }
 

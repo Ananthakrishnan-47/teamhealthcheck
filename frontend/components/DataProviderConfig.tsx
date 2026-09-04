@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Save } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import {
   getOrganizationProviderSettings,
-  updateOrganizationProviderToken,
   syncOrganizationProvider,
   clearAdminCache,
   OrganizationProviderSettings,
@@ -12,22 +11,19 @@ import {
 } from "@/lib/api/admin";
 
 /**
- * Configuration and manual trigger for the external organization-data provider.
+ * Manual trigger for the external organization-data provider sync.
  *
- * Syncing rewrites users, teams and memberships, so it is deliberately manual:
- * an admin decides when the organization changes shape.
+ * The provider credential (DATA_PROVIDER_BASE_URL / DATA_PROVIDER_API_TOKEN)
+ * is environment configuration on the backend -- there is deliberately no
+ * token-entry UI here. Syncing can create, update, and hard-delete users,
+ * teams, and memberships, so it is deliberately manual: an admin decides when
+ * the organization changes shape.
  */
 export default function DataProviderConfig() {
   const [settings, setSettings] = useState<OrganizationProviderSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Token form
-  const [token, setToken] = useState("");
-  const [savingToken, setSavingToken] = useState(false);
-  const [tokenSaved, setTokenSaved] = useState(false);
-
-  // Sync
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<OrganizationSyncResult | null>(null);
 
@@ -44,27 +40,6 @@ export default function DataProviderConfig() {
       setError(err.message || "Failed to load provider settings");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSaveToken = async () => {
-    if (!token.trim()) return;
-
-    setSavingToken(true);
-    setError(null);
-    setTokenSaved(false);
-    try {
-      await updateOrganizationProviderToken(token.trim());
-      // Drop the plaintext as soon as it has been handed over; it is
-      // write-only and can never be read back.
-      setToken("");
-      setTokenSaved(true);
-      setTimeout(() => setTokenSaved(false), 3000);
-      await loadSettings();
-    } catch (err: any) {
-      setError(err.message || "Failed to save provider token");
-    } finally {
-      setSavingToken(false);
     }
   };
 
@@ -99,6 +74,7 @@ export default function DataProviderConfig() {
   }
 
   const readyToSync = settings?.readyToSync ?? false;
+  const isMassDeletionHold = !!error?.toLowerCase().includes("held for review");
 
   return (
     <div>
@@ -122,8 +98,8 @@ export default function DataProviderConfig() {
       </div>
 
       <p className="text-sm text-gray-500 mb-4">
-        Pulls people, teams and team membership from your provider and applies them to Team360.
-        Existing users and teams are never deleted.
+        Pulls people, teams and team membership from Data Provider and applies them to Team360. The Data Provider is
+        authoritative: a user or team no longer reported by Data Provider is removed from Team360.
       </p>
 
       {!readyToSync && (
@@ -137,17 +113,16 @@ export default function DataProviderConfig() {
             <ul className="text-sm text-amber-700 mt-1 list-disc list-inside space-y-0.5">
               {!settings?.baseUrlConfigured && (
                 <li>
-                  Set <code className="bg-amber-100 px-1 rounded">PODIQ_BASE_URL</code> on the API
-                  service.
+                  Set <code className="bg-amber-100 px-1 rounded">DATA_PROVIDER_BASE_URL</code> on
+                  the API service.
                 </li>
               )}
-              {!settings?.encryptionConfigured && (
+              {!settings?.tokenConfigured && (
                 <li>
-                  Set <code className="bg-amber-100 px-1 rounded">TOKEN_ENCRYPTION_KEY</code> to a
-                  base64-encoded 32-byte key.
+                  Set <code className="bg-amber-100 px-1 rounded">DATA_PROVIDER_API_TOKEN</code> on
+                  the API service.
                 </li>
               )}
-              {!settings?.configured && <li>Save a provider API token below.</li>}
             </ul>
           </div>
         </div>
@@ -155,12 +130,12 @@ export default function DataProviderConfig() {
 
       {error && (
         <div
-          data-testid="provider-error"
+          data-testid={isMassDeletionHold ? "sync-mass-deletion-hold" : "provider-error"}
           className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3"
         >
           <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
           <div>
-            <p className="font-medium text-red-900">Error</p>
+            <p className="font-medium text-red-900">{isMassDeletionHold ? "Sync held for review" : "Error"}</p>
             <p className="text-sm text-red-700">{error}</p>
           </div>
         </div>
@@ -178,15 +153,21 @@ export default function DataProviderConfig() {
               {syncResult.usersSynced} users, {syncResult.teamsSynced} teams and{" "}
               {syncResult.membershipsSynced} team memberships synchronized.
             </p>
-            {syncResult.usersSkipped > 0 && (
-              <p className="text-sm text-green-700 mt-1" data-testid="sync-skipped">
-                {syncResult.usersSkipped} user(s) skipped because their hierarchy level is not
-                configured in Team360.
+            {(syncResult.usersDeleted > 0 || syncResult.teamsDeleted > 0) && (
+              <p className="text-sm text-green-700 mt-1" data-testid="sync-deleted">
+                {syncResult.usersDeleted} user(s) and {syncResult.teamsDeleted} team(s) removed
+                (no longer reported by the provider).
               </p>
             )}
             {syncResult.membershipsRemoved > 0 && (
               <p className="text-sm text-green-700 mt-1">
                 {syncResult.membershipsRemoved} stale team membership(s) removed.
+              </p>
+            )}
+            {syncResult.actionItemsDeleted > 0 && (
+              <p className="text-sm text-amber-700 mt-1" data-testid="sync-action-items-deleted">
+                {syncResult.actionItemsDeleted} action item(s) removed along with their deleted
+                user or team.
               </p>
             )}
           </div>
@@ -209,44 +190,6 @@ export default function DataProviderConfig() {
           </div>
         </div>
       )}
-
-      <div className="p-4 border border-gray-200 rounded-lg">
-        <label htmlFor="provider-api-token" className="block text-sm font-medium text-gray-700 mb-1">
-          Provider API Token
-        </label>
-        <p className="text-xs text-gray-500 mb-2">
-          {settings?.configured
-            ? "A token is stored. Entering a new one replaces it. Tokens can never be read back."
-            : "No token stored yet."}
-        </p>
-        <div className="flex items-center gap-2">
-          <input
-            id="provider-api-token"
-            data-testid="provider-token-input"
-            type="password"
-            autoComplete="off"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder={settings?.configured ? "Enter a new token to replace" : "Paste the API token"}
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-          <button
-            data-testid="save-provider-token-btn"
-            onClick={handleSaveToken}
-            disabled={savingToken || !token.trim()}
-            aria-label="Save provider API token"
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {savingToken ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {savingToken ? "Saving..." : "Save Token"}
-          </button>
-        </div>
-        {tokenSaved && (
-          <p className="text-green-600 text-sm mt-2" data-testid="provider-token-saved">
-            Token saved
-          </p>
-        )}
-      </div>
     </div>
   );
 }

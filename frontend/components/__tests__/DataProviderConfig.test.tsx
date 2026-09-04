@@ -5,13 +5,11 @@ import userEvent from '@testing-library/user-event';
 // The component talks to the backend only through these functions, so mocking
 // the module keeps the test on the component's own behaviour.
 const getSettings = vi.fn();
-const updateToken = vi.fn();
 const sync = vi.fn();
 const clearCache = vi.fn();
 
 vi.mock('@/lib/api/admin', () => ({
   getOrganizationProviderSettings: (...a: any[]) => getSettings(...a),
-  updateOrganizationProviderToken: (...a: any[]) => updateToken(...a),
   syncOrganizationProvider: (...a: any[]) => sync(...a),
   clearAdminCache: (...a: any[]) => clearCache(...a),
 }));
@@ -19,12 +17,10 @@ vi.mock('@/lib/api/admin', () => ({
 import DataProviderConfig from '../DataProviderConfig';
 
 const READY = {
-  provider: 'podiq',
-  configured: true,
+  provider: 'data-provider',
   baseUrlConfigured: true,
-  encryptionConfigured: true,
+  tokenConfigured: true,
   readyToSync: true,
-  tokenUpdatedAt: '2026-08-31T05:00:00Z',
 };
 
 const SYNC_RESULT = {
@@ -35,6 +31,9 @@ const SYNC_RESULT = {
   membershipsRemoved: 0,
   healthChecksDisabled: 0,
   healthChecksEnabled: 0,
+  usersDeleted: 0,
+  teamsDeleted: 0,
+  actionItemsDeleted: 0,
   usersSkipped: 0,
   skippedUsers: [],
   managerLinksCleared: 0,
@@ -68,6 +67,12 @@ describe('DataProviderConfig — Sync Now button', () => {
     expect(btn).toBeEnabled();
     expect(btn).toHaveTextContent('Sync Now');
     expect(screen.queryByTestId('provider-not-configured')).not.toBeInTheDocument();
+  });
+
+  it('never renders a token entry field', async () => {
+    await renderReady();
+    expect(screen.queryByTestId('provider-token-input')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('save-provider-token-btn')).not.toBeInTheDocument();
   });
 
   it('calls the sync API exactly once when clicked', async () => {
@@ -132,7 +137,29 @@ describe('DataProviderConfig — Sync Now button', () => {
     expect(clearCache).toHaveBeenCalledTimes(1);
   });
 
-  it('reports skipped users and teams whose health checks were switched off', async () => {
+  it('shows deletion counts when the provider no longer reports a user or team', async () => {
+    const user = userEvent.setup();
+    sync.mockResolvedValue({ ...SYNC_RESULT, usersDeleted: 3, teamsDeleted: 1 });
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+
+    expect(await screen.findByTestId('sync-deleted')).toHaveTextContent('3 user(s) and 1 team(s) removed');
+  });
+
+  it('shows an action-items-deleted notice when a deletion cascades into action items', async () => {
+    const user = userEvent.setup();
+    sync.mockResolvedValue({ ...SYNC_RESULT, actionItemsDeleted: 3 });
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+
+    expect(await screen.findByTestId('sync-action-items-deleted')).toHaveTextContent(
+      '3 action item(s) removed'
+    );
+  });
+
+  it('reports teams whose health checks were switched off, without ever mentioning skipped users', async () => {
     const user = userEvent.setup();
     sync.mockResolvedValue({
       ...SYNC_RESULT,
@@ -144,10 +171,12 @@ describe('DataProviderConfig — Sync Now button', () => {
 
     await user.click(screen.getByTestId('sync-now-btn'));
 
-    expect(await screen.findByTestId('sync-skipped')).toHaveTextContent('3 user(s) skipped');
     expect(screen.getByTestId('sync-health-check-warning')).toHaveTextContent(
       'Health checks switched off for 24 team(s)'
     );
+    // Skipped-user counts (including anyone the provider excludes by hierarchy level)
+    // are intentionally never surfaced in this UI.
+    expect(screen.queryByTestId('sync-skipped')).not.toBeInTheDocument();
   });
 
   it('shows a safe message on failure and leaves the button usable', async () => {
@@ -163,42 +192,29 @@ describe('DataProviderConfig — Sync Now button', () => {
     expect(screen.getByTestId('sync-now-btn')).toBeEnabled();
   });
 
+  it('shows a distinct mass-deletion-hold message and leaves the button usable', async () => {
+    const user = userEvent.setup();
+    sync.mockRejectedValue(new Error('Sync held for review: this sync would remove an unusually large share of users or teams.'));
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+
+    const holdBanner = await screen.findByTestId('sync-mass-deletion-hold');
+    expect(holdBanner).toHaveTextContent('held for review');
+    expect(screen.getByTestId('sync-now-btn')).toBeEnabled();
+  });
+
   it('disables the button and explains why when the provider is not ready', async () => {
     await renderReady({
       ...READY,
-      configured: false,
       baseUrlConfigured: false,
-      encryptionConfigured: false,
+      tokenConfigured: false,
       readyToSync: false,
-      tokenUpdatedAt: null,
-    } as any);
+    });
 
     expect(screen.getByTestId('sync-now-btn')).toBeDisabled();
     const banner = screen.getByTestId('provider-not-configured');
-    expect(banner).toHaveTextContent('PODIQ_BASE_URL');
-    expect(banner).toHaveTextContent('TOKEN_ENCRYPTION_KEY');
-    expect(banner).toHaveTextContent('Save a provider API token below.');
-  });
-});
-
-describe('DataProviderConfig — token form', () => {
-  it('submits the token, clears the field and never renders it back', async () => {
-    const user = userEvent.setup();
-    updateToken.mockResolvedValue(undefined);
-    await renderReady({ ...READY, configured: false, readyToSync: false } as any);
-
-    const input = screen.getByTestId('provider-token-input') as HTMLInputElement;
-    await user.type(input, 'super-secret-token');
-    await user.click(screen.getByTestId('save-provider-token-btn'));
-
-    await waitFor(() => expect(updateToken).toHaveBeenCalledWith('super-secret-token'));
-    await waitFor(() => expect(input.value).toBe(''));
-    expect(await screen.findByTestId('provider-token-saved')).toBeInTheDocument();
-    expect(document.body.textContent).not.toContain('super-secret-token');
-  });
-
-  it('keeps the save button disabled until a token is entered', async () => {
-    await renderReady();
-    expect(screen.getByTestId('save-provider-token-btn')).toBeDisabled();
+    expect(banner).toHaveTextContent('DATA_PROVIDER_BASE_URL');
+    expect(banner).toHaveTextContent('DATA_PROVIDER_API_TOKEN');
   });
 });

@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"errors"
+	"os"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -13,32 +15,38 @@ import (
 	"github.com/agopalakrishnan/teams360/backend/pkg/orgsnapshot"
 )
 
+// EnvMaxDeletePercent names the environment variable configuring the
+// mass-deletion guard. See defaultMaxDeletePercent for the fallback.
+const EnvMaxDeletePercent = "ORG_SYNC_MAX_DELETE_PERCENT"
+
+// defaultMaxDeletePercent is deliberately conservative: a sync that would
+// remove more than a fifth of the currently-synced, non-protected users or
+// teams in one run is more likely a bad/incomplete snapshot than a real
+// mass-departure event, and should be held for human review rather than
+// applied automatically.
+const defaultMaxDeletePercent = 20.0
+
 // Errors returned by OrganizationSyncService. Handlers map these to status codes.
 var (
 	// ErrSyncInProgress means another synchronization is already running.
 	ErrSyncInProgress = errors.New("a synchronization is already in progress")
-	// ErrProviderNotConfigured means no API token has been stored.
+	// ErrProviderNotConfigured means the data provider client is not configured.
 	ErrProviderNotConfigured = errors.New("organization provider is not configured")
-	// ErrEncryptionNotConfigured means the token cannot be decrypted.
-	ErrEncryptionNotConfigured = errors.New("token encryption is not configured")
 	// ErrInvalidSnapshot means the provider returned data that breaches the contract.
 	ErrInvalidSnapshot = errors.New("provider snapshot failed contract validation")
 )
 
-// SnapshotFetcher fetches an organization snapshot from an external provider.
-// The sync service depends on this interface rather than a concrete client so a
-// second provider can be added without touching orchestration.
+// SnapshotFetcher fetches a complete organization snapshot from an external
+// provider. The sync service depends on this interface, not a concrete
+// client, so a second provider can be added without touching orchestration.
+// The fetcher owns its own credentials (read from its own environment
+// configuration); it is never handed a token by this service.
 type SnapshotFetcher interface {
-	FetchSnapshot(ctx context.Context, token string) (*orgsnapshot.Snapshot, error)
-	Configured() bool
+	FetchSnapshot(ctx context.Context) (*orgsnapshot.Snapshot, error)
 }
 
-// TokenCipher decrypts the stored provider token.
-type TokenCipher interface {
-	Decrypt(encoded string) (string, error)
-}
-
-// SyncResult is the outcome of one synchronization run.
+// SyncResult is the outcome of one synchronization run, returned to the API
+// caller. It never carries a token, header, or the raw provider payload.
 type SyncResult struct {
 	Status string `json:"status"`
 
@@ -49,6 +57,10 @@ type SyncResult struct {
 
 	HealthChecksDisabled int `json:"healthChecksDisabled"`
 	HealthChecksEnabled  int `json:"healthChecksEnabled"`
+
+	UsersDeleted       int `json:"usersDeleted"`
+	TeamsDeleted       int `json:"teamsDeleted"`
+	ActionItemsDeleted int `json:"actionItemsDeleted"`
 
 	UsersSkipped         int                       `json:"usersSkipped"`
 	SkippedUsers         []orgprovider.SkippedUser `json:"skippedUsers,omitempty"`
@@ -65,7 +77,6 @@ type SyncResult struct {
 type OrganizationSyncService struct {
 	repo     orgprovider.Repository
 	fetcher  SnapshotFetcher
-	cipher   TokenCipher
 	userRepo user.Repository
 	teamRepo team.Repository
 
@@ -75,35 +86,33 @@ type OrganizationSyncService struct {
 	running atomic.Bool
 }
 
-// NewOrganizationSyncService creates the service. A nil cipher or an
-// unconfigured fetcher is tolerated at construction; Sync reports the
-// misconfiguration when it is actually invoked.
+// NewOrganizationSyncService creates the service. A nil fetcher is tolerated
+// at construction (mirrors the "disabled until configured" convention used
+// elsewhere); Sync reports the misconfiguration when actually invoked.
 func NewOrganizationSyncService(
 	repo orgprovider.Repository,
 	fetcher SnapshotFetcher,
-	cipher TokenCipher,
 	userRepo user.Repository,
 	teamRepo team.Repository,
 ) *OrganizationSyncService {
 	return &OrganizationSyncService{
 		repo:     repo,
 		fetcher:  fetcher,
-		cipher:   cipher,
 		userRepo: userRepo,
 		teamRepo: teamRepo,
 	}
 }
 
-// Configured reports whether a sync could run: a provider URL and a usable cipher.
+// Configured reports whether a sync could run at all.
 func (s *OrganizationSyncService) Configured() bool {
-	return s.fetcher != nil && s.fetcher.Configured() && s.cipher != nil
+	return s.fetcher != nil
 }
 
 // Sync fetches, validates and applies a snapshot.
 //
 // Returns ErrSyncInProgress when another run holds the lock. All persistence
-// happens in a single transaction, so a failure at any point leaves THC
-// untouched.
+// happens in a single transaction, so a failure at any point -- including the
+// mass-deletion guard tripping -- leaves THC untouched.
 func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error) {
 	if !s.running.CompareAndSwap(false, true) {
 		return nil, ErrSyncInProgress
@@ -113,12 +122,11 @@ func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error)
 	log := logger.Get()
 	startedAt := time.Now().UTC()
 
-	token, err := s.resolveToken(ctx)
-	if err != nil {
-		return nil, err
+	if s.fetcher == nil {
+		return nil, ErrProviderNotConfigured
 	}
 
-	snapshot, err := s.fetcher.FetchSnapshot(ctx, token)
+	snapshot, err := s.fetcher.FetchSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -140,6 +148,7 @@ func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error)
 		Snapshot:                 filtered.Snapshot,
 		PreservedMemberUserIDs:   filtered.PreservedMemberUserIDs,
 		PreserveReportsToUserIDs: filtered.PreserveReportsToUserIDs,
+		MaxDeletePercent:         maxDeletePercent(),
 	})
 	if err != nil {
 		return nil, err
@@ -148,8 +157,11 @@ func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error)
 	// The supervisor chain is a denormalized cache derived from reports_to.
 	// Rebuilding it is best-effort and deliberately outside the transaction:
 	// the sync has already committed, and a stale cache is recoverable whereas
-	// a rolled-back org import is not.
-	s.rederiveSupervisorChains(ctx, filtered.Snapshot.Teams)
+	// a rolled-back org import is not. A failure here is logged but does not
+	// change the sync's reported status -- it is a real (if narrow) gap
+	// between "the sync completed" and "every derived structure is
+	// consistent," called out explicitly rather than silently claimed away.
+	supervisorChainErr := s.rederiveSupervisorChains(ctx, filtered.Snapshot.Teams)
 
 	result := &SyncResult{
 		Status:               "completed",
@@ -159,6 +171,9 @@ func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error)
 		MembershipsRemoved:   applied.MembershipsRemoved,
 		HealthChecksDisabled: applied.HealthChecksDisabled,
 		HealthChecksEnabled:  applied.HealthChecksEnabled,
+		UsersDeleted:         applied.UsersDeleted,
+		TeamsDeleted:         applied.TeamsDeleted,
+		ActionItemsDeleted:   applied.ActionItemsDeleted,
 		UsersSkipped:         len(filtered.SkippedUsers),
 		SkippedUsers:         filtered.SkippedUsers,
 		ManagerLinksCleared:  filtered.ClearedManagers,
@@ -167,51 +182,47 @@ func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error)
 		StartedAt:            startedAt,
 		CompletedAt:          time.Now().UTC(),
 	}
+	if supervisorChainErr != nil {
+		result.Status = "completed_with_warnings"
+	}
 
 	log.WithFields(map[string]interface{}{
-		"usersSynced":          result.UsersSynced,
-		"teamsSynced":          result.TeamsSynced,
-		"membershipsSynced":    result.MembershipsSynced,
-		"usersSkipped":         result.UsersSkipped,
-		"healthChecksDisabled": result.HealthChecksDisabled,
+		"usersSynced":       result.UsersSynced,
+		"teamsSynced":       result.TeamsSynced,
+		"membershipsSynced": result.MembershipsSynced,
+		"usersDeleted":      result.UsersDeleted,
+		"teamsDeleted":      result.TeamsDeleted,
+		"usersSkipped":      result.UsersSkipped,
 	}).Info("organization provider sync completed")
 
 	return result, nil
 }
 
-// resolveToken loads and decrypts the stored provider token.
-func (s *OrganizationSyncService) resolveToken(ctx context.Context) (string, error) {
-	if s.fetcher == nil || !s.fetcher.Configured() {
-		return "", ErrProviderNotConfigured
+// maxDeletePercent reads the configurable mass-deletion threshold, falling
+// back to defaultMaxDeletePercent when unset or invalid.
+func maxDeletePercent() float64 {
+	raw := os.Getenv(EnvMaxDeletePercent)
+	if raw == "" {
+		return defaultMaxDeletePercent
 	}
-	if s.cipher == nil {
-		return "", ErrEncryptionNotConfigured
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value <= 0 {
+		return defaultMaxDeletePercent
 	}
-
-	creds, err := s.repo.GetCredentials(ctx)
-	if err != nil {
-		return "", err
-	}
-	if creds == nil || creds.APITokenEncrypted == "" {
-		return "", ErrProviderNotConfigured
-	}
-
-	token, err := s.cipher.Decrypt(creds.APITokenEncrypted)
-	if err != nil {
-		return "", err
-	}
-
-	return token, nil
+	return value
 }
 
 // rederiveSupervisorChains refreshes team_supervisors for the synced teams,
-// mirroring the derivation the admin team handler performs after a lead changes.
-func (s *OrganizationSyncService) rederiveSupervisorChains(ctx context.Context, teams []orgsnapshot.Team) {
+// mirroring the derivation the admin team handler performs after a lead
+// changes. Returns a non-nil error if any team's chain failed to rebuild, so
+// the caller can surface that the post-commit step was incomplete.
+func (s *OrganizationSyncService) rederiveSupervisorChains(ctx context.Context, teams []orgsnapshot.Team) error {
 	if s.userRepo == nil || s.teamRepo == nil {
-		return
+		return nil
 	}
 
 	log := logger.Get()
+	var firstErr error
 
 	for _, t := range teams {
 		stored, err := s.teamRepo.FindByID(ctx, t.ID)
@@ -222,6 +233,9 @@ func (s *OrganizationSyncService) rederiveSupervisorChains(ctx context.Context, 
 		supervisors, err := s.userRepo.FindSupervisorChainUp(ctx, *stored.TeamLeadID)
 		if err != nil {
 			log.Warn("failed to derive supervisor chain for team " + t.ID + ": " + err.Error())
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 
@@ -232,6 +246,11 @@ func (s *OrganizationSyncService) rederiveSupervisorChains(ctx context.Context, 
 
 		if err := s.teamRepo.UpdateSupervisorChain(ctx, t.ID, chain); err != nil {
 			log.Warn("failed to save derived supervisor chain for team " + t.ID + ": " + err.Error())
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
+
+	return firstErr
 }

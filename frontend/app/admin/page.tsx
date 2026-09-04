@@ -1610,6 +1610,10 @@ export default function AdminPage() {
               </h2>
 
               <div className="space-y-6">
+                <div data-testid="data-provider-settings">
+                  <DataProviderConfig />
+                </div>
+
                 <div data-testid="dimensions-settings">
                   <DimensionConfig />
                 </div>
@@ -1798,10 +1802,6 @@ export default function AdminPage() {
                     </select>
                   </div>
                 </div>
-              </div>
-
-              <div data-testid="data-provider-settings">
-                <DataProviderConfig />
               </div>
 
               {settingsError && (

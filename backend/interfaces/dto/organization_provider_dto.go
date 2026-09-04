@@ -1,30 +1,19 @@
 package dto
 
-import "time"
-
-// OrganizationProviderSettingsDTO reports how the external organization-data
-// provider is configured.
+// OrganizationProviderSettingsDTO reports whether the external organization-
+// data provider is configured and ready to sync.
 //
-// It never carries the API token, encrypted or otherwise: the token leaves the
-// database only to be sent to the provider. The UI needs to know whether a token
-// exists, not what it is.
+// There is no token field, ever: the provider credential lives only in
+// environment configuration (DATA_PROVIDER_BASE_URL / DATA_PROVIDER_API_TOKEN),
+// is read once at startup by the transport client, and is never stored,
+// echoed, or otherwise made readable through this API.
 type OrganizationProviderSettingsDTO struct {
 	Provider string `json:"provider"`
 
-	// Configured is true when a token has been stored.
-	Configured bool `json:"configured"`
-	// BaseURLConfigured is true when the provider URL is set in the environment.
+	// BaseURLConfigured is true when DATA_PROVIDER_BASE_URL is set and valid.
 	BaseURLConfigured bool `json:"baseUrlConfigured"`
-	// EncryptionConfigured is true when a token encryption key is available.
-	EncryptionConfigured bool `json:"encryptionConfigured"`
-	// ReadyToSync is true when every prerequisite above is met.
+	// TokenConfigured is true when DATA_PROVIDER_API_TOKEN is set.
+	TokenConfigured bool `json:"tokenConfigured"`
+	// ReadyToSync is true when every configuration prerequisite is met.
 	ReadyToSync bool `json:"readyToSync"`
-
-	TokenUpdatedAt *time.Time `json:"tokenUpdatedAt,omitempty"`
-}
-
-// UpdateOrganizationProviderTokenRequest carries a new provider API token.
-// This field is write-only; no endpoint ever returns it.
-type UpdateOrganizationProviderTokenRequest struct {
-	APIToken string `json:"apiToken" binding:"required"`
 }
