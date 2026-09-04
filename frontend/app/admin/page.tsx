@@ -1610,7 +1610,7 @@ export default function AdminPage() {
               </h2>
 
               <div className="space-y-6">
-                <div data-testid="data-provider-settings">
+                <div className="border rounded-lg p-4" data-testid="data-provider-settings">
                   <DataProviderConfig />
                 </div>
 
