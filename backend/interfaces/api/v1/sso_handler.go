@@ -44,6 +44,19 @@ func NewSSOHandler(userRepo user.Repository, jwtService *services.JWTService) *S
 // Callback exchanges the authorization code + PKCE verifier for provider tokens,
 // extracts the email from the id_token, looks the user up in the DB, and issues
 // our own JWT token pair — the same structure as a regular password login.
+//
+// @Summary SSO OAuth callback
+// @Description Exchanges an authorization code + PKCE verifier for the OAuth provider's tokens, resolves the user by email, and issues our own JWT access/refresh token pair. Public endpoint.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param body body v1.ssoCallbackRequest true "Authorization code and PKCE verifier"
+// @Success 200 {object} dto.LoginResponse
+// @Failure 400 {object} dto.ErrorResponse "Missing code or code_verifier"
+// @Failure 401 {object} dto.ErrorResponse "Token exchange failed, no account found, or account does not support SSO"
+// @Failure 500 {object} dto.ErrorResponse "Failed to generate authentication tokens"
+// @Failure 503 {object} dto.ErrorResponse "SSO is not configured on this server"
+// @Router /auth/sso/callback [post]
 func (h *SSOHandler) Callback(c *gin.Context) {
 	ctx := c.Request.Context()
 	log := logger.Get().WithContext(ctx)

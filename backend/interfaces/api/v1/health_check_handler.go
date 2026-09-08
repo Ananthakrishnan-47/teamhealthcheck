@@ -56,6 +56,17 @@ func NewHealthCheckHandler(repository healthcheck.Repository, orgRepo organizati
 }
 
 // SubmitHealthCheck handles POST /api/v1/health-checks
+//
+// @Summary Submit a health check session
+// @Description Submits a team member's health check responses for an assessment period. Fires an async email notification on success.
+// @Tags health-checks
+// @Accept json
+// @Produce json
+// @Param body body dto.SubmitHealthCheckRequest true "Health check submission"
+// @Success 201 {object} dto.HealthCheckSessionResponse
+// @Failure 400 {object} dto.ErrorResponse "Invalid request body, invalid date, invalid/future assessment period, or command failure"
+// @Security BearerAuth
+// @Router /health-checks [post]
 func (h *HealthCheckHandler) SubmitHealthCheck(c *gin.Context) {
 	ctx := c.Request.Context()
 	startTime := time.Now()
@@ -201,6 +212,15 @@ func (h *HealthCheckHandler) SubmitHealthCheck(c *gin.Context) {
 }
 
 // GetHealthDimensions handles GET /api/v1/health-dimensions
+//
+// @Summary List active health dimensions
+// @Description Returns the currently active health dimensions used to build the survey (e.g. Mission, Speed, Fun).
+// @Tags health-checks
+// @Produce json
+// @Success 200 {object} dto.HealthDimensionsResponse
+// @Failure 500 {object} dto.ErrorResponse "Failed to fetch dimensions"
+// @Security BearerAuth
+// @Router /health-dimensions [get]
 func (h *HealthCheckHandler) GetHealthDimensions(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -249,6 +269,16 @@ func (h *HealthCheckHandler) GetHealthDimensions(c *gin.Context) {
 }
 
 // GetHealthCheckByID handles GET /api/v1/health-checks/:id
+//
+// @Summary Get a health check session by ID
+// @Description Returns a single health check session and its dimension responses.
+// @Tags health-checks
+// @Produce json
+// @Param id path string true "Health check session ID"
+// @Success 200 {object} dto.HealthCheckSessionResponse
+// @Failure 404 {object} dto.ErrorResponse "Session not found"
+// @Security BearerAuth
+// @Router /health-checks/{id} [get]
 func (h *HealthCheckHandler) GetHealthCheckByID(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -278,6 +308,17 @@ func (h *HealthCheckHandler) GetHealthCheckByID(c *gin.Context) {
 }
 
 // GetTeamHealthChecks handles GET /api/v1/health-checks/team/:id
+//
+// @Summary List a team's health check sessions
+// @Description Returns all health check sessions submitted for a team, optionally filtered by assessment period.
+// @Tags health-checks
+// @Produce json
+// @Param id path string true "Team ID"
+// @Param assessmentPeriod query string false "Filter by assessment period (e.g. '2024 - 1st Half')"
+// @Success 200 {object} dto.HealthCheckSessionsResponse
+// @Failure 500 {object} dto.ErrorResponse "Failed to fetch sessions"
+// @Security BearerAuth
+// @Router /health-checks/team/{id} [get]
 func (h *HealthCheckHandler) GetTeamHealthChecks(c *gin.Context) {
 	ctx := c.Request.Context()
 	startTime := time.Now()
@@ -331,6 +372,18 @@ func (h *HealthCheckHandler) GetTeamHealthChecks(c *gin.Context) {
 }
 
 // GetTeamSubmissionStatus handles GET /api/v1/teams/:teamId/submission-status
+//
+// @Summary Get a team's submission status for a period
+// @Description Returns how many team members have submitted a health check for the given assessment period, and whether a post-workshop survey exists.
+// @Tags health-checks
+// @Produce json
+// @Param teamId path string true "Team ID"
+// @Param assessmentPeriod query string true "Assessment period (e.g. '2024 - 1st Half')"
+// @Success 200 {object} dto.TeamSubmissionStatusResponse
+// @Failure 400 {object} dto.ErrorResponse "Missing teamId or assessmentPeriod"
+// @Failure 500 {object} dto.ErrorResponse "Failed to get submission status"
+// @Security BearerAuth
+// @Router /teams/{teamId}/submission-status [get]
 func (h *HealthCheckHandler) GetTeamSubmissionStatus(c *gin.Context) {
 	ctx := c.Request.Context()
 	teamID := c.Param("teamId")
@@ -370,6 +423,15 @@ func (h *HealthCheckHandler) GetTeamSubmissionStatus(c *gin.Context) {
 }
 
 // GetAssessmentPeriods handles GET /api/v1/assessment-periods
+//
+// @Summary List distinct assessment periods
+// @Description Returns the distinct assessment periods that have submitted health check data, for populating dropdowns.
+// @Tags health-checks
+// @Produce json
+// @Success 200 {object} map[string][]string "periods"
+// @Failure 500 {object} dto.ErrorResponse "Failed to fetch assessment periods"
+// @Security BearerAuth
+// @Router /assessment-periods [get]
 func (h *HealthCheckHandler) GetAssessmentPeriods(c *gin.Context) {
 	periods, err := h.repository.FindDistinctAssessmentPeriods(c.Request.Context())
 	if err != nil {

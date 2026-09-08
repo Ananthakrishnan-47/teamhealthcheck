@@ -33,6 +33,17 @@ func NewAuthHandler(userRepo user.Repository, orgRepo organization.Repository, j
 }
 
 // Login handles user authentication
+//
+// @Summary Log in with username and password
+// @Description Authenticates a local user via username/password and issues a JWT access/refresh token pair. Public endpoint — SSO users cannot log in here.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param body body dto.LoginRequest true "Login credentials"
+// @Success 200 {object} dto.LoginResponse
+// @Failure 400 {object} dto.ErrorResponse "Missing username or password"
+// @Failure 401 {object} dto.ErrorResponse "Invalid credentials, SSO-only user, or token generation failed"
+// @Router /auth/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	ctx := c.Request.Context()
 	startTime := time.Now()
@@ -181,6 +192,17 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 // Refresh handles token refresh requests
+//
+// @Summary Refresh an access token
+// @Description Exchanges a valid refresh token for a new access token. Public endpoint.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param body body dto.RefreshTokenRequest true "Refresh token"
+// @Success 200 {object} dto.RefreshTokenResponse
+// @Failure 400 {object} dto.ErrorResponse "Missing refresh token"
+// @Failure 401 {object} dto.ErrorResponse "Invalid or expired refresh token, or user no longer exists"
+// @Router /auth/refresh [post]
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -297,6 +319,13 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 }
 
 // Logout handles user logout (token invalidation)
+//
+// @Summary Log out
+// @Description Logs the user out. For stateless JWT, this is handled client-side by discarding tokens; the endpoint records the logout event. Public endpoint (works with or without a valid session).
+// @Tags auth
+// @Produce json
+// @Success 200 {object} map[string]string "message"
+// @Router /auth/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	ctx := c.Request.Context()
 

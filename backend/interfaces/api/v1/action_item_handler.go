@@ -23,6 +23,18 @@ func NewActionItemHandler(db *sql.DB) *ActionItemHandler {
 }
 
 // ListActionItems handles GET /api/v1/teams/:teamId/action-items
+//
+// @Summary List a team's action items
+// @Description Returns action items for a team, optionally filtered by status and/or assessment period. Requires team membership.
+// @Tags action-items
+// @Produce json
+// @Param teamId path string true "Team ID"
+// @Param status query string false "Filter by status (open, in_progress, done)"
+// @Param period query string false "Filter by assessment period"
+// @Success 200 {object} dto.ActionItemsResponse
+// @Failure 500 {object} dto.ErrorResponse "Failed to fetch/scan/read action items"
+// @Security BearerAuth
+// @Router /teams/{teamId}/action-items [get]
 func (h *ActionItemHandler) ListActionItems(c *gin.Context) {
 	teamID := c.Param("teamId")
 	status := c.Query("status")
@@ -114,6 +126,20 @@ func (h *ActionItemHandler) ListActionItems(c *gin.Context) {
 }
 
 // CreateActionItem handles POST /api/v1/teams/:teamId/action-items
+//
+// @Summary Create a team action item
+// @Description Creates a new action item for a team. If assignedTo is set, the user must be a member of the team. Requires team membership.
+// @Tags action-items
+// @Accept json
+// @Produce json
+// @Param teamId path string true "Team ID"
+// @Param body body dto.CreateActionItemRequest true "Action item"
+// @Success 201 {object} map[string]interface{} "id, status, createdAt"
+// @Failure 400 {object} dto.ErrorResponse "Invalid request, invalid dueDate, or assignedTo not a team member"
+// @Failure 401 {object} dto.ErrorResponse "Unauthorized"
+// @Failure 500 {object} dto.ErrorResponse "Failed to validate assignee or create action item"
+// @Security BearerAuth
+// @Router /teams/{teamId}/action-items [post]
 func (h *ActionItemHandler) CreateActionItem(c *gin.Context) {
 	teamID := c.Param("teamId")
 
@@ -172,6 +198,21 @@ func (h *ActionItemHandler) CreateActionItem(c *gin.Context) {
 }
 
 // UpdateActionItem handles PATCH /api/v1/teams/:teamId/action-items/:id
+//
+// @Summary Update a team action item
+// @Description Partially updates an action item's fields. If assignedTo is set, the user must be a member of the team. Requires team membership.
+// @Tags action-items
+// @Accept json
+// @Produce json
+// @Param teamId path string true "Team ID"
+// @Param id path string true "Action item ID"
+// @Param body body dto.UpdateActionItemRequest true "Fields to update"
+// @Success 200 {object} map[string]bool "updated"
+// @Failure 400 {object} dto.ErrorResponse "Invalid request, invalid status/dueDate, or assignedTo not a team member"
+// @Failure 404 {object} dto.ErrorResponse "Action item not found"
+// @Failure 500 {object} dto.ErrorResponse "Failed to validate assignee or update action item"
+// @Security BearerAuth
+// @Router /teams/{teamId}/action-items/{id} [patch]
 func (h *ActionItemHandler) UpdateActionItem(c *gin.Context) {
 	teamID := c.Param("teamId")
 	itemID := c.Param("id")
@@ -242,6 +283,18 @@ func (h *ActionItemHandler) UpdateActionItem(c *gin.Context) {
 }
 
 // DeleteActionItem handles DELETE /api/v1/teams/:teamId/action-items/:id
+//
+// @Summary Delete a team action item
+// @Description Deletes an action item belonging to a team. Requires team membership.
+// @Tags action-items
+// @Produce json
+// @Param teamId path string true "Team ID"
+// @Param id path string true "Action item ID"
+// @Success 200 {object} map[string]bool "deleted"
+// @Failure 404 {object} dto.ErrorResponse "Action item not found"
+// @Failure 500 {object} dto.ErrorResponse "Failed to delete action item"
+// @Security BearerAuth
+// @Router /teams/{teamId}/action-items/{id} [delete]
 func (h *ActionItemHandler) DeleteActionItem(c *gin.Context) {
 	teamID := c.Param("teamId")
 	itemID := c.Param("id")
@@ -262,6 +315,17 @@ func (h *ActionItemHandler) DeleteActionItem(c *gin.Context) {
 }
 
 // GetTeamsActionSummary handles GET /api/v1/managers/:managerId/teams/action-items
+//
+// @Summary Get open action item counts across a manager's teams
+// @Description Returns each supervised team's open (non-done) action item count. Requires manager-or-above role; caller may only request their own summary.
+// @Tags action-items
+// @Produce json
+// @Param managerId path string true "Manager ID"
+// @Success 200 {object} dto.TeamsActionSummaryResponse
+// @Failure 403 {object} dto.ErrorResponse "Forbidden — can only view your own summary"
+// @Failure 500 {object} dto.ErrorResponse "Failed to fetch/read action summaries"
+// @Security BearerAuth
+// @Router /managers/{managerId}/teams/action-items [get]
 func (h *ActionItemHandler) GetTeamsActionSummary(c *gin.Context) {
 	managerID := c.Param("managerId")
 

@@ -24,6 +24,17 @@ func NewPasswordResetHandler(resetService *services.PasswordResetService, userRe
 }
 
 // ForgotPassword handles forgot password requests
+//
+// @Summary Request a password reset email
+// @Description Creates a password reset token and emails a reset link. Always returns success (even for unknown emails) to prevent email enumeration. Public endpoint.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param body body dto.ForgotPasswordRequest true "Email address"
+// @Success 200 {object} map[string]string "message"
+// @Failure 400 {object} dto.ErrorResponse "Missing or invalid email"
+// @Failure 500 {object} map[string]string "error"
+// @Router /auth/forgot-password [post]
 func (h *PasswordResetHandler) ForgotPassword(c *gin.Context) {
 	var req dto.ForgotPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -52,6 +63,18 @@ func (h *PasswordResetHandler) ForgotPassword(c *gin.Context) {
 }
 
 // ResetPassword handles password reset with token
+//
+// @Summary Reset password using a reset token
+// @Description Resets a user's password given a valid reset token. Public endpoint.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param body body dto.ResetPasswordRequest true "Reset token and new password"
+// @Success 200 {object} map[string]string "message"
+// @Failure 400 {object} dto.ErrorResponse "Missing token/password or password too short"
+// @Failure 401 {object} dto.ErrorResponse "Invalid or expired reset token"
+// @Failure 500 {object} dto.ErrorResponse "Failed to reset password"
+// @Router /auth/reset-password [post]
 func (h *PasswordResetHandler) ResetPassword(c *gin.Context) {
 	var req dto.ResetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

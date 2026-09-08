@@ -28,6 +28,18 @@ func NewManagerHandler(healthCheckRepo healthcheck.Repository, trendsService *tr
 }
 
 // GetManagerTeamsHealth handles GET /api/v1/managers/:managerId/teams/health
+//
+// @Summary Get aggregated team health for a manager
+// @Description Returns per-team health summaries (submission count, overall health, per-dimension averages) for all teams supervised by the given manager. Requires manager-or-above role and same-user-or-manager access.
+// @Tags managers
+// @Produce json
+// @Param managerId path string true "Manager ID"
+// @Param assessmentPeriod query string false "Filter by assessment period"
+// @Success 200 {object} dto.ManagerTeamsHealthResponse
+// @Failure 400 {object} dto.ErrorResponse "Manager ID is required"
+// @Failure 500 {object} dto.ErrorResponse "Database query failed"
+// @Security BearerAuth
+// @Router /managers/{managerId}/teams/health [get]
 func (h *ManagerHandler) GetManagerTeamsHealth(c *gin.Context) {
 	ctx := c.Request.Context()
 	managerID := c.Param("managerId")
@@ -84,6 +96,18 @@ func (h *ManagerHandler) GetManagerTeamsHealth(c *gin.Context) {
 
 // GetManagerAggregatedRadar handles GET /api/v1/managers/:managerId/dashboard/radar
 // Returns aggregated radar chart data across all supervised teams
+//
+// @Summary Get aggregated radar chart data for a manager
+// @Description Returns aggregated per-dimension average scores across all teams supervised by the given manager, for a radar chart. Requires manager-or-above role and same-user-or-manager access.
+// @Tags managers
+// @Produce json
+// @Param managerId path string true "Manager ID"
+// @Param assessmentPeriod query string false "Filter by assessment period"
+// @Success 200 {object} dto.ManagerRadarResponse
+// @Failure 400 {object} dto.ErrorResponse "Manager ID is required"
+// @Failure 500 {object} dto.ErrorResponse "Database query failed"
+// @Security BearerAuth
+// @Router /managers/{managerId}/dashboard/radar [get]
 func (h *ManagerHandler) GetManagerAggregatedRadar(c *gin.Context) {
 	ctx := c.Request.Context()
 	managerID := c.Param("managerId")
@@ -126,6 +150,17 @@ func (h *ManagerHandler) GetManagerAggregatedRadar(c *gin.Context) {
 
 // GetManagerTrends handles GET /api/v1/managers/:managerId/dashboard/trends
 // Returns trend data across assessment periods for all supervised teams
+//
+// @Summary Get trend data for a manager's supervised teams
+// @Description Returns per-dimension trend data across assessment periods, aggregated over all teams supervised by the given manager. Requires manager-or-above role and same-user-or-manager access.
+// @Tags managers
+// @Produce json
+// @Param managerId path string true "Manager ID"
+// @Success 200 {object} dto.ManagerTrendsResponse
+// @Failure 400 {object} dto.ErrorResponse "Manager ID is required"
+// @Failure 500 {object} dto.ErrorResponse "Failed to fetch trend data"
+// @Security BearerAuth
+// @Router /managers/{managerId}/dashboard/trends [get]
 func (h *ManagerHandler) GetManagerTrends(c *gin.Context) {
 	ctx := c.Request.Context()
 	managerID := c.Param("managerId")
@@ -162,6 +197,17 @@ func (h *ManagerHandler) GetManagerTrends(c *gin.Context) {
 
 // GetSubordinates handles GET /api/v1/managers/:managerId/subordinates
 // Returns the full subordinate tree for org hierarchy display
+//
+// @Summary Get a manager's subordinates
+// @Description Returns the full subordinate tree (direct and indirect reports) for the given manager, for org hierarchy display. Requires manager-or-above role and same-user-or-manager access.
+// @Tags managers
+// @Produce json
+// @Param managerId path string true "Manager ID"
+// @Success 200 {object} dto.SubordinatesResponse
+// @Failure 400 {object} dto.ErrorResponse "Manager ID is required"
+// @Failure 500 {object} dto.ErrorResponse "Failed to fetch subordinates"
+// @Security BearerAuth
+// @Router /managers/{managerId}/subordinates [get]
 func (h *ManagerHandler) GetSubordinates(c *gin.Context) {
 	ctx := c.Request.Context()
 	managerID := c.Param("managerId")

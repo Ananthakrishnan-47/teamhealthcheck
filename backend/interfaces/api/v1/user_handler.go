@@ -25,6 +25,15 @@ func NewUserHandler(db *sql.DB) *UserHandler {
 
 // GetCurrentUser returns the currently authenticated user's info
 // GET /api/v1/users/me (requires JWT auth)
+//
+// @Summary Get the current authenticated user
+// @Description Returns the profile of the currently authenticated user, derived from JWT claims plus a full-name lookup.
+// @Tags users
+// @Produce json
+// @Success 200 {object} dto.UserDTO
+// @Failure 401 {object} dto.ErrorResponse "User not authenticated"
+// @Security BearerAuth
+// @Router /users/me [get]
 func (h *UserHandler) GetCurrentUser(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -67,6 +76,19 @@ func SetupProtectedUserRoutes(router *gin.Engine, db *sql.DB, jwtService *servic
 }
 
 // GetUserSurveyHistory handles GET /api/v1/users/:userId/survey-history
+//
+// @Summary Get a user's survey history
+// @Description Returns a user's past health check submissions with per-dimension responses, optionally filtered by assessment period and limited in count. Requires same-user-or-manager access.
+// @Tags users
+// @Produce json
+// @Param userId path string true "User ID"
+// @Param assessmentPeriod query string false "Filter by assessment period"
+// @Param limit query int false "Max number of sessions to return (default 10)"
+// @Success 200 {object} dto.SurveyHistoryResponse
+// @Failure 400 {object} dto.ErrorResponse "User ID is required"
+// @Failure 500 {object} dto.ErrorResponse "Database query failed or failed to parse survey history data"
+// @Security BearerAuth
+// @Router /users/{userId}/survey-history [get]
 func (h *UserHandler) GetUserSurveyHistory(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID := c.Param("userId")

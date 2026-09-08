@@ -20,6 +20,15 @@ func NewHierarchyAdminHandler(orgRepo organization.Repository) *HierarchyAdminHa
 }
 
 // ListHierarchyLevels handles GET /api/v1/admin/hierarchy-levels
+//
+// @Summary List hierarchy levels
+// @Description Returns all organizational hierarchy levels (e.g. VP, Director, Manager). Requires admin (level-1) role.
+// @Tags admin-hierarchy
+// @Produce json
+// @Success 200 {object} dto.HierarchyLevelsResponse
+// @Failure 500 {object} dto.ErrorResponse "Failed to query hierarchy levels"
+// @Security BearerAuth
+// @Router /admin/hierarchy-levels [get]
 func (h *HierarchyAdminHandler) ListHierarchyLevels(c *gin.Context) {
 	hierarchyLevels, err := h.orgRepo.FindHierarchyLevels(c.Request.Context())
 	if err != nil {
@@ -53,6 +62,18 @@ func (h *HierarchyAdminHandler) ListHierarchyLevels(c *gin.Context) {
 }
 
 // CreateHierarchyLevel handles POST /api/v1/admin/hierarchy-levels
+//
+// @Summary Create a hierarchy level
+// @Description Creates a new organizational hierarchy level, appended at the end of the position order. Requires admin (level-1) role.
+// @Tags admin-hierarchy
+// @Accept json
+// @Produce json
+// @Param body body dto.CreateHierarchyLevelRequest true "Hierarchy level"
+// @Success 201 {object} dto.HierarchyLevelDTO
+// @Failure 400 {object} dto.ErrorResponse "Invalid request body"
+// @Failure 500 {object} dto.ErrorResponse "Failed to determine position or create hierarchy level"
+// @Security BearerAuth
+// @Router /admin/hierarchy-levels [post]
 func (h *HierarchyAdminHandler) CreateHierarchyLevel(c *gin.Context) {
 	var req dto.CreateHierarchyLevelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -117,6 +138,20 @@ func (h *HierarchyAdminHandler) CreateHierarchyLevel(c *gin.Context) {
 }
 
 // UpdateHierarchyLevel handles PUT /api/v1/admin/hierarchy-levels/:id
+//
+// @Summary Update a hierarchy level
+// @Description Updates a hierarchy level's name and/or permissions. Requires admin (level-1) role.
+// @Tags admin-hierarchy
+// @Accept json
+// @Produce json
+// @Param id path string true "Hierarchy level ID"
+// @Param body body dto.UpdateHierarchyLevelRequest true "Fields to update"
+// @Success 200 {object} dto.HierarchyLevelDTO
+// @Failure 400 {object} dto.ErrorResponse "Invalid request body"
+// @Failure 404 {object} dto.ErrorResponse "Hierarchy level not found"
+// @Failure 500 {object} dto.ErrorResponse "Failed to update hierarchy level"
+// @Security BearerAuth
+// @Router /admin/hierarchy-levels/{id} [put]
 func (h *HierarchyAdminHandler) UpdateHierarchyLevel(c *gin.Context) {
 	id := c.Param("id")
 	var req dto.UpdateHierarchyLevelRequest
@@ -174,6 +209,20 @@ func (h *HierarchyAdminHandler) UpdateHierarchyLevel(c *gin.Context) {
 }
 
 // UpdateHierarchyPosition handles PUT /api/v1/admin/hierarchy-levels/:id/position
+//
+// @Summary Reorder a hierarchy level
+// @Description Moves a hierarchy level to a new position, shifting the other levels accordingly. Requires admin (level-1) role.
+// @Tags admin-hierarchy
+// @Accept json
+// @Produce json
+// @Param id path string true "Hierarchy level ID"
+// @Param body body dto.UpdateHierarchyPositionRequest true "New position"
+// @Success 200 {object} dto.MessageResponse
+// @Failure 400 {object} dto.ErrorResponse "Invalid request body"
+// @Failure 404 {object} dto.ErrorResponse "Hierarchy level not found"
+// @Failure 500 {object} dto.ErrorResponse "Failed to start transaction, reorder levels, update position, or commit"
+// @Security BearerAuth
+// @Router /admin/hierarchy-levels/{id}/position [put]
 func (h *HierarchyAdminHandler) UpdateHierarchyPosition(c *gin.Context) {
 	id := c.Param("id")
 	var req dto.UpdateHierarchyPositionRequest
@@ -230,6 +279,17 @@ func (h *HierarchyAdminHandler) UpdateHierarchyPosition(c *gin.Context) {
 }
 
 // DeleteHierarchyLevel handles DELETE /api/v1/admin/hierarchy-levels/:id
+//
+// @Summary Delete a hierarchy level
+// @Description Deletes a hierarchy level. Fails if any users are still assigned to it. Requires admin (level-1) role.
+// @Tags admin-hierarchy
+// @Produce json
+// @Param id path string true "Hierarchy level ID"
+// @Success 200 {object} dto.MessageResponse
+// @Failure 409 {object} dto.ErrorResponse "Users are assigned to this level"
+// @Failure 500 {object} dto.ErrorResponse "Database error or failed to delete hierarchy level"
+// @Security BearerAuth
+// @Router /admin/hierarchy-levels/{id} [delete]
 func (h *HierarchyAdminHandler) DeleteHierarchyLevel(c *gin.Context) {
 	id := c.Param("id")
 

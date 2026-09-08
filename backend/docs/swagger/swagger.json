@@ -1,0 +1,4338 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Team360 Health Check Application REST API. Assesses team health across 11 dimensions with hierarchical org support.",
+        "title": "Team360 API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "basePath": "/api/v1",
+    "paths": {
+        "/admin/hierarchy-levels": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns all organizational hierarchy levels (e.g. VP, Director, Manager). Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-hierarchy"
+                ],
+                "summary": "List hierarchy levels",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HierarchyLevelsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to query hierarchy levels",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a new organizational hierarchy level, appended at the end of the position order. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-hierarchy"
+                ],
+                "summary": "Create a hierarchy level",
+                "parameters": [
+                    {
+                        "description": "Hierarchy level",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.CreateHierarchyLevelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HierarchyLevelDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to determine position or create hierarchy level",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/hierarchy-levels/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates a hierarchy level's name and/or permissions. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-hierarchy"
+                ],
+                "summary": "Update a hierarchy level",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Hierarchy level ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateHierarchyLevelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HierarchyLevelDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Hierarchy level not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to update hierarchy level",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a hierarchy level. Fails if any users are still assigned to it. Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-hierarchy"
+                ],
+                "summary": "Delete a hierarchy level",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Hierarchy level ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.MessageResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Users are assigned to this level",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Database error or failed to delete hierarchy level",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/hierarchy-levels/{id}/position": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Moves a hierarchy level to a new position, shifting the other levels accordingly. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-hierarchy"
+                ],
+                "summary": "Reorder a hierarchy level",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Hierarchy level ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New position",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateHierarchyPositionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Hierarchy level not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to start transaction, reorder levels, update position, or commit",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/settings/branding": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the company name and logo URL used for branding. Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Get branding settings",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.BrandingSettings"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch branding settings",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates the company name and/or logo URL (base64 data URL capped at ~500KB). Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Update branding settings",
+                "parameters": [
+                    {
+                        "description": "Branding settings",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.BrandingSettings"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.BrandingSettings"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or logo too large",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to save branding settings",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/settings/dimensions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns all health dimensions, including inactive ones. Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "List health dimensions (admin)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.DimensionsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to query dimensions",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a new health dimension. Weight must be between 0 and 10 (defaults to 1.0); isActive defaults to true. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Create a health dimension",
+                "parameters": [
+                    {
+                        "description": "Dimension to create",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.CreateDimensionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthDimensionDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or weight out of range",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to create dimension",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/settings/dimensions/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates a health dimension's fields. Weight must be between 0 and 10. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Update a health dimension",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Dimension ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateDimensionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthDimensionDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or weight out of range",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Dimension not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to update dimension",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a health dimension. Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Delete a health dimension",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Dimension ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "message",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to delete dimension",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/settings/notifications": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns notification configuration (email/Slack enabled, submission reminders, SMTP status). Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Get notification settings",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.NotificationSettings"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch settings",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates notification configuration (email/Slack enabled, weekly digest). Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Update notification settings",
+                "parameters": [
+                    {
+                        "description": "Notification settings",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.NotificationSettings"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.NotificationSettings"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to save settings",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/settings/retention": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the data retention policy (months to keep sessions, anonymization window). Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Get data retention policy",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.RetentionPolicy"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch retention policy",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates the data retention policy. keepSessionsMonths must be between 1 and 120. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-settings"
+                ],
+                "summary": "Update data retention policy",
+                "parameters": [
+                    {
+                        "description": "Retention policy",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.RetentionPolicy"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.RetentionPolicy"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or keepSessionsMonths out of range",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to save retention policy",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/teams": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns all teams with full admin details (team lead, cadence, distribution list, member count). Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-teams"
+                ],
+                "summary": "List all teams (admin)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to query teams",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a new team. If a team lead is set, the supervisor chain is auto-derived from their reports-to hierarchy. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-teams"
+                ],
+                "summary": "Create a team",
+                "parameters": [
+                    {
+                        "description": "Team to create",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.CreateTeamRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.AdminTeamDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to create team",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/teams/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates a team's name, lead, cadence, and/or distribution list email. Re-derives (or clears) the supervisor chain if the team lead changes. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-teams"
+                ],
+                "summary": "Update a team",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateTeamRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.AdminTeamDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Team not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to update team",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a team. Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-teams"
+                ],
+                "summary": "Delete a team",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.MessageResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to delete team",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/teams/{id}/members": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the members of a team. Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-teams"
+                ],
+                "summary": "List a team's members (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamMembersResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Team not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch team members",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Adds a user as a member of a team. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-teams"
+                ],
+                "summary": "Add a member to a team",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "User to add",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.AddTeamMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Team not found or user not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to add team member",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/teams/{id}/members/{userId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Removes a user from a team's membership. Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-teams"
+                ],
+                "summary": "Remove a member from a team",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "userId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.MessageResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Team member not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to remove team member",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/teams/{id}/supervisors": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the team's supervisor chain (derived from the team lead's reports-to hierarchy), enriched with user and level names. Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-teams"
+                ],
+                "summary": "Get a team's supervisor chain",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.SupervisorChainResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Team not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch supervisor chain",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Overwrites the team's supervisor chain with the given list. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-teams"
+                ],
+                "summary": "Replace a team's supervisor chain",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New supervisor chain",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateSupervisorChainRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.SupervisorChainResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Team not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to update supervisor chain",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/users": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns all users. Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-users"
+                ],
+                "summary": "List users",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.UsersResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to query users",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a new user (local or SSO auth type). Local users require a password. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-users"
+                ],
+                "summary": "Create a user",
+                "parameters": [
+                    {
+                        "description": "User to create",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.CreateUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.AdminUserDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or missing/short password for local user",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to hash password or create user",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/users/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates a user's profile, role, auth type, and/or password. Re-derives supervisor chains if reportsTo or hierarchy level changes. Requires admin (level-1) role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-users"
+                ],
+                "summary": "Update a user",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.AdminUserDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body, invalid authType, cannot set password for SSO user, or password required when switching to local auth",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to hash password, update user, or update password",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a user. Requires admin (level-1) role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-users"
+                ],
+                "summary": "Delete a user",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.MessageResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to delete user",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/assessment-periods": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the distinct assessment periods that have submitted health check data, for populating dropdowns.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health-checks"
+                ],
+                "summary": "List distinct assessment periods",
+                "responses": {
+                    "200": {
+                        "description": "periods",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch assessment periods",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/forgot-password": {
+            "post": {
+                "description": "Creates a password reset token and emails a reset link. Always returns success (even for unknown emails) to prevent email enumeration. Public endpoint.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Request a password reset email",
+                "parameters": [
+                    {
+                        "description": "Email address",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ForgotPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "message",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Missing or invalid email",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/login": {
+            "post": {
+                "description": "Authenticates a local user via username/password and issues a JWT access/refresh token pair. Public endpoint — SSO users cannot log in here.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Log in with username and password",
+                "parameters": [
+                    {
+                        "description": "Login credentials",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.LoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.LoginResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing username or password",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid credentials, SSO-only user, or token generation failed",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/logout": {
+            "post": {
+                "description": "Logs the user out. For stateless JWT, this is handled client-side by discarding tokens; the endpoint records the logout event. Public endpoint (works with or without a valid session).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Log out",
+                "responses": {
+                    "200": {
+                        "description": "message",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/refresh": {
+            "post": {
+                "description": "Exchanges a valid refresh token for a new access token. Public endpoint.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Refresh an access token",
+                "parameters": [
+                    {
+                        "description": "Refresh token",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.RefreshTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.RefreshTokenResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing refresh token",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or expired refresh token, or user no longer exists",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/reset-password": {
+            "post": {
+                "description": "Resets a user's password given a valid reset token. Public endpoint.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Reset password using a reset token",
+                "parameters": [
+                    {
+                        "description": "Reset token and new password",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ResetPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "message",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Missing token/password or password too short",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or expired reset token",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to reset password",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/sso/callback": {
+            "post": {
+                "description": "Exchanges an authorization code + PKCE verifier for the OAuth provider's tokens, resolves the user by email, and issues our own JWT access/refresh token pair. Public endpoint.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "SSO OAuth callback",
+                "parameters": [
+                    {
+                        "description": "Authorization code and PKCE verifier",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/interfaces_api_v1.ssoCallbackRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.LoginResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing code or code_verifier",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Token exchange failed, no account found, or account does not support SSO",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to generate authentication tokens",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "SSO is not configured on this server",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/config": {
+            "get": {
+                "description": "Returns SSO settings and branding info (company name, logo) so the frontend can render the login page and \"Sign in with SSO\" button without baking values in at build time. No authentication required.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Get public app configuration",
+                "responses": {
+                    "200": {
+                        "description": "appEnv, companyName, logoURL, and sso (null or {clientId, authorizeUrl, redirectUri, scopes})",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "description": "Returns 200 with a simple status payload. Used by tests and load balancers. Public endpoint.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Liveness check",
+                "responses": {
+                    "200": {
+                        "description": "status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/health-checks": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Submits a team member's health check responses for an assessment period. Fires an async email notification on success.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health-checks"
+                ],
+                "summary": "Submit a health check session",
+                "parameters": [
+                    {
+                        "description": "Health check submission",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.SubmitHealthCheckRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckSessionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body, invalid date, invalid/future assessment period, or command failure",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/health-checks/team/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns all health check sessions submitted for a team, optionally filtered by assessment period.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health-checks"
+                ],
+                "summary": "List a team's health check sessions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by assessment period (e.g. '2024 - 1st Half')",
+                        "name": "assessmentPeriod",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckSessionsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch sessions",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/health-checks/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a single health check session and its dimension responses.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health-checks"
+                ],
+                "summary": "Get a health check session by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Health check session ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckSessionResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/health-dimensions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the currently active health dimensions used to build the survey (e.g. Mission, Speed, Fun).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health-checks"
+                ],
+                "summary": "List active health dimensions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthDimensionsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch dimensions",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/managers/{managerId}/dashboard/radar": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns aggregated per-dimension average scores across all teams supervised by the given manager, for a radar chart. Requires manager-or-above role and same-user-or-manager access.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "managers"
+                ],
+                "summary": "Get aggregated radar chart data for a manager",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Manager ID",
+                        "name": "managerId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by assessment period",
+                        "name": "assessmentPeriod",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ManagerRadarResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Manager ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Database query failed",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/managers/{managerId}/dashboard/trends": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns per-dimension trend data across assessment periods, aggregated over all teams supervised by the given manager. Requires manager-or-above role and same-user-or-manager access.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "managers"
+                ],
+                "summary": "Get trend data for a manager's supervised teams",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Manager ID",
+                        "name": "managerId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ManagerTrendsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Manager ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch trend data",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/managers/{managerId}/subordinates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the full subordinate tree (direct and indirect reports) for the given manager, for org hierarchy display. Requires manager-or-above role and same-user-or-manager access.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "managers"
+                ],
+                "summary": "Get a manager's subordinates",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Manager ID",
+                        "name": "managerId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.SubordinatesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Manager ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch subordinates",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/managers/{managerId}/teams/action-items": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns each supervised team's open (non-done) action item count. Requires manager-or-above role; caller may only request their own summary.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "action-items"
+                ],
+                "summary": "Get open action item counts across a manager's teams",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Manager ID",
+                        "name": "managerId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamsActionSummaryResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden — can only view your own summary",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch/read action summaries",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/managers/{managerId}/teams/health": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns per-team health summaries (submission count, overall health, per-dimension averages) for all teams supervised by the given manager. Requires manager-or-above role and same-user-or-manager access.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "managers"
+                ],
+                "summary": "Get aggregated team health for a manager",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Manager ID",
+                        "name": "managerId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by assessment period",
+                        "name": "assessmentPeriod",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ManagerTeamsHealthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Manager ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Database query failed",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/teams": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a list of all teams with summary info (name, cadence, member count, team lead). Available to any authenticated user.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teams"
+                ],
+                "summary": "List all teams",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch teams",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/teams/{teamId}/action-items": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns action items for a team, optionally filtered by status and/or assessment period. Requires team membership.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "action-items"
+                ],
+                "summary": "List a team's action items",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status (open, in_progress, done)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by assessment period",
+                        "name": "period",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ActionItemsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch/scan/read action items",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a new action item for a team. If assignedTo is set, the user must be a member of the team. Requires team membership.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "action-items"
+                ],
+                "summary": "Create a team action item",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Action item",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.CreateActionItemRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "id, status, createdAt",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request, invalid dueDate, or assignedTo not a team member",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to validate assignee or create action item",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/teams/{teamId}/action-items/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes an action item belonging to a team. Requires team membership.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "action-items"
+                ],
+                "summary": "Delete a team action item",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Action item ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "deleted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Action item not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to delete action item",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Partially updates an action item's fields. If assignedTo is set, the user must be a member of the team. Requires team membership.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "action-items"
+                ],
+                "summary": "Update a team action item",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Action item ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateActionItemRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "updated",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request, invalid status/dueDate, or assignedTo not a team member",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Action item not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to validate assignee or update action item",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/teams/{teamId}/dashboard/health-summary": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns radar chart data: overall health and per-dimension average scores for a team, optionally filtered by assessment period. Requires team membership.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "team-dashboard"
+                ],
+                "summary": "Get team health summary",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by assessment period",
+                        "name": "assessmentPeriod",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamDashboardHealthSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Team ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Team not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Database query failed or failed to parse dimension data",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/teams/{teamId}/dashboard/individual-responses": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns individual (non-anonymized) team member survey responses with per-dimension scores and comments, optionally filtered by assessment period. Requires team membership.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "team-dashboard"
+                ],
+                "summary": "Get individual team member responses",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by assessment period",
+                        "name": "assessmentPeriod",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.IndividualResponses"
+                        }
+                    },
+                    "400": {
+                        "description": "Team ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Database query failed or failed to parse response data",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/teams/{teamId}/dashboard/response-distribution": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns red/yellow/green score counts per dimension for a bar chart, optionally filtered by assessment period. Requires team membership.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "team-dashboard"
+                ],
+                "summary": "Get team response distribution",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by assessment period",
+                        "name": "assessmentPeriod",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ResponseDistribution"
+                        }
+                    },
+                    "400": {
+                        "description": "Team ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Database query failed or failed to parse distribution data",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/teams/{teamId}/dashboard/trends": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns per-dimension trend data across assessment periods for a team. Requires team membership.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "team-dashboard"
+                ],
+                "summary": "Get team trend data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TrendData"
+                        }
+                    },
+                    "400": {
+                        "description": "Team ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch trend data",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/teams/{teamId}/info": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns team details (name, cadence, team lead, members). Requires team membership.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teams"
+                ],
+                "summary": "Get team info",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamInfoResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Team ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Team not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch team members",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/teams/{teamId}/sessions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns all health check sessions for a team, optionally filtered by assessment period. Requires team membership.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "teams"
+                ],
+                "summary": "List a team's health check sessions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by assessment period",
+                        "name": "assessmentPeriod",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckSessionsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Team ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to fetch team sessions",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/teams/{teamId}/submission-status": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns how many team members have submitted a health check for the given assessment period, and whether a post-workshop survey exists.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health-checks"
+                ],
+                "summary": "Get a team's submission status for a period",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Team ID",
+                        "name": "teamId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Assessment period (e.g. '2024 - 1st Half')",
+                        "name": "assessmentPeriod",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamSubmissionStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing teamId or assessmentPeriod",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get submission status",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the profile of the currently authenticated user, derived from JWT claims plus a full-name lookup.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get the current authenticated user",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.UserDTO"
+                        }
+                    },
+                    "401": {
+                        "description": "User not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{userId}/survey-history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a user's past health check submissions with per-dimension responses, optionally filtered by assessment period and limited in count. Requires same-user-or-manager access.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get a user's survey history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "userId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by assessment period",
+                        "name": "assessmentPeriod",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max number of sessions to return (default 10)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.SurveyHistoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "User ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Database query failed or failed to parse survey history data",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.ActionItemResponse": {
+            "type": "object",
+            "properties": {
+                "assessmentPeriod": {
+                    "type": "string"
+                },
+                "assignedTo": {
+                    "type": "string"
+                },
+                "assigneeName": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "createdBy": {
+                    "type": "string"
+                },
+                "createdByName": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "dimensionId": {
+                    "type": "string"
+                },
+                "dimensionName": {
+                    "type": "string"
+                },
+                "dueDate": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "teamId": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.ActionItemsResponse": {
+            "type": "object",
+            "properties": {
+                "actionItems": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ActionItemResponse"
+                    }
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.AddTeamMemberRequest": {
+            "type": "object",
+            "required": [
+                "userId"
+            ],
+            "properties": {
+                "userId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.AdminTeamDTO": {
+            "type": "object",
+            "properties": {
+                "cadence": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "distributionListEmail": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "memberCount": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "teamLeadId": {
+                    "type": "string"
+                },
+                "teamLeadName": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.AdminUserDTO": {
+            "type": "object",
+            "properties": {
+                "authType": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "fullName": {
+                    "type": "string"
+                },
+                "hierarchyLevel": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "reportsTo": {
+                    "type": "string"
+                },
+                "teamIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.BrandingSettings": {
+            "type": "object",
+            "required": [
+                "companyName"
+            ],
+            "properties": {
+                "companyName": {
+                    "type": "string",
+                    "maxLength": 100
+                },
+                "logoURL": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.CreateActionItemRequest": {
+            "type": "object",
+            "required": [
+                "title"
+            ],
+            "properties": {
+                "assessmentPeriod": {
+                    "type": "string"
+                },
+                "assignedTo": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "dimensionId": {
+                    "type": "string"
+                },
+                "dueDate": {
+                    "description": "ISO date string YYYY-MM-DD",
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 500
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.CreateDimensionRequest": {
+            "type": "object",
+            "required": [
+                "badDescription",
+                "goodDescription",
+                "id",
+                "name"
+            ],
+            "properties": {
+                "badDescription": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "goodDescription": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "isActive": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "weight": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.CreateHierarchyLevelRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "id": {
+                    "description": "Optional - will be auto-generated from name if not provided",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Required - used to generate ID if not provided",
+                    "type": "string"
+                },
+                "permissions": {
+                    "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HierarchyPermissionsDTO"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.CreateTeamRequest": {
+            "type": "object",
+            "required": [
+                "cadence",
+                "name"
+            ],
+            "properties": {
+                "cadence": {
+                    "type": "string",
+                    "enum": [
+                        "monthly",
+                        "quarterly",
+                        "half-yearly",
+                        "yearly"
+                    ]
+                },
+                "distributionListEmail": {
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Optional - will be auto-generated from name if not provided",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Required - used to generate ID if not provided",
+                    "type": "string"
+                },
+                "teamLeadId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.CreateUserRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "fullName",
+                "hierarchyLevel",
+                "username"
+            ],
+            "properties": {
+                "authType": {
+                    "description": "\"local\" (default) or \"sso\"",
+                    "type": "string",
+                    "enum": [
+                        "local",
+                        "sso"
+                    ]
+                },
+                "email": {
+                    "type": "string"
+                },
+                "fullName": {
+                    "type": "string"
+                },
+                "hierarchyLevel": {
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Optional - will be auto-generated from username if not provided",
+                    "type": "string"
+                },
+                "password": {
+                    "description": "Required for local users, omit for SSO users",
+                    "type": "string"
+                },
+                "reportsTo": {
+                    "type": "string"
+                },
+                "username": {
+                    "description": "Required - used to generate ID if not provided",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.DimensionDistribution": {
+            "type": "object",
+            "properties": {
+                "dimensionId": {
+                    "type": "string"
+                },
+                "green": {
+                    "description": "score = 3",
+                    "type": "integer"
+                },
+                "red": {
+                    "description": "score = 1",
+                    "type": "integer"
+                },
+                "yellow": {
+                    "description": "score = 2",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.DimensionSummary": {
+            "type": "object",
+            "properties": {
+                "avgScore": {
+                    "type": "number"
+                },
+                "dimensionId": {
+                    "type": "string"
+                },
+                "responseCount": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.DimensionTrend": {
+            "type": "object",
+            "properties": {
+                "dimensionId": {
+                    "type": "string"
+                },
+                "scores": {
+                    "description": "matches periods array order",
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.DimensionsResponse": {
+            "type": "object",
+            "properties": {
+                "dimensions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthDimensionDTO"
+                    }
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.ForgotPasswordRequest": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckResponseRequest": {
+            "type": "object",
+            "required": [
+                "dimensionId",
+                "score",
+                "trend"
+            ],
+            "properties": {
+                "comment": {
+                    "type": "string"
+                },
+                "dimensionId": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer",
+                    "maximum": 3,
+                    "minimum": 1
+                },
+                "trend": {
+                    "type": "string",
+                    "enum": [
+                        "improving",
+                        "stable",
+                        "declining"
+                    ]
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckResponseResponse": {
+            "type": "object",
+            "properties": {
+                "comment": {
+                    "type": "string"
+                },
+                "dimensionId": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
+                },
+                "trend": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckSessionResponse": {
+            "type": "object",
+            "properties": {
+                "assessmentPeriod": {
+                    "type": "string"
+                },
+                "completed": {
+                    "type": "boolean"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "responses": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckResponseResponse"
+                    }
+                },
+                "surveyType": {
+                    "type": "string"
+                },
+                "teamId": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckSessionsResponse": {
+            "type": "object",
+            "properties": {
+                "sessions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckSessionResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthDimensionDTO": {
+            "type": "object",
+            "properties": {
+                "badDescription": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "goodDescription": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "isActive": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "weight": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthDimensionResponse": {
+            "type": "object",
+            "properties": {
+                "badDescription": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "goodDescription": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "isActive": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "weight": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthDimensionsResponse": {
+            "type": "object",
+            "properties": {
+                "dimensions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthDimensionResponse"
+                    }
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.HierarchyLevelDTO": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "permissions": {
+                    "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HierarchyPermissionsDTO"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.HierarchyLevelsResponse": {
+            "type": "object",
+            "properties": {
+                "levels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HierarchyLevelDTO"
+                    }
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.HierarchyPermissionsDTO": {
+            "type": "object",
+            "properties": {
+                "canEditTeams": {
+                    "type": "boolean"
+                },
+                "canManageUsers": {
+                    "type": "boolean"
+                },
+                "canTakeSurvey": {
+                    "type": "boolean"
+                },
+                "canViewAllTeams": {
+                    "type": "boolean"
+                },
+                "canViewAnalytics": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.IndividualDimensionResp": {
+            "type": "object",
+            "properties": {
+                "comment": {
+                    "type": "string"
+                },
+                "dimensionId": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
+                },
+                "trend": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.IndividualResponses": {
+            "type": "object",
+            "properties": {
+                "responses": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.IndividualUserResponse"
+                    }
+                },
+                "teamId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.IndividualUserResponse": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string"
+                },
+                "dimensions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.IndividualDimensionResp"
+                    }
+                },
+                "sessionId": {
+                    "type": "string"
+                },
+                "surveyType": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "string"
+                },
+                "userName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.LoginRequest": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.LoginResponse": {
+            "type": "object",
+            "properties": {
+                "accessToken": {
+                    "type": "string"
+                },
+                "expiresIn": {
+                    "description": "Access token expiry in seconds",
+                    "type": "integer"
+                },
+                "refreshToken": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.UserDTO"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.ManagerDimensionTrend": {
+            "type": "object",
+            "properties": {
+                "dimensionId": {
+                    "type": "string"
+                },
+                "scores": {
+                    "description": "matches periods array order",
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.ManagerRadarResponse": {
+            "type": "object",
+            "properties": {
+                "assessmentPeriod": {
+                    "type": "string"
+                },
+                "dimensions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.DimensionSummary"
+                    }
+                },
+                "managerId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.ManagerTeamsHealthResponse": {
+            "type": "object",
+            "properties": {
+                "assessmentPeriod": {
+                    "type": "string"
+                },
+                "managerId": {
+                    "type": "string"
+                },
+                "teams": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamHealthSummary"
+                    }
+                },
+                "totalTeams": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.ManagerTrendsResponse": {
+            "type": "object",
+            "properties": {
+                "dimensions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.ManagerDimensionTrend"
+                    }
+                },
+                "managerId": {
+                    "type": "string"
+                },
+                "periods": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.NotificationSettings": {
+            "type": "object",
+            "properties": {
+                "emailEnabled": {
+                    "type": "boolean"
+                },
+                "notifyManagers": {
+                    "type": "boolean"
+                },
+                "notifyOnSubmission": {
+                    "type": "boolean"
+                },
+                "reminderDaysBefore": {
+                    "type": "integer"
+                },
+                "reminderRecipients": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "slackEnabled": {
+                    "type": "boolean"
+                },
+                "smtpConfigured": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.RefreshTokenRequest": {
+            "type": "object",
+            "required": [
+                "refreshToken"
+            ],
+            "properties": {
+                "refreshToken": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.RefreshTokenResponse": {
+            "type": "object",
+            "properties": {
+                "accessToken": {
+                    "type": "string"
+                },
+                "expiresIn": {
+                    "description": "Access token expiry in seconds",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.ResetPasswordRequest": {
+            "type": "object",
+            "required": [
+                "newPassword",
+                "token"
+            ],
+            "properties": {
+                "newPassword": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.ResponseDistribution": {
+            "type": "object",
+            "properties": {
+                "distribution": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.DimensionDistribution"
+                    }
+                },
+                "teamId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.RetentionPolicy": {
+            "type": "object",
+            "properties": {
+                "anonymizeAfterDays": {
+                    "type": "integer"
+                },
+                "archiveEnabled": {
+                    "type": "boolean"
+                },
+                "keepSessionsMonths": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.SubmitHealthCheckRequest": {
+            "type": "object",
+            "required": [
+                "date",
+                "responses",
+                "teamId",
+                "userId"
+            ],
+            "properties": {
+                "assessmentPeriod": {
+                    "type": "string"
+                },
+                "completed": {
+                    "type": "boolean"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "responses": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HealthCheckResponseRequest"
+                    }
+                },
+                "surveyType": {
+                    "type": "string"
+                },
+                "teamId": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.SubordinateDTO": {
+            "type": "object",
+            "properties": {
+                "hierarchyLevelId": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "reportsTo": {
+                    "type": "string"
+                },
+                "teamIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.SubordinatesResponse": {
+            "type": "object",
+            "properties": {
+                "managerId": {
+                    "type": "string"
+                },
+                "subordinates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.SubordinateDTO"
+                    }
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.SupervisorChainResponse": {
+            "type": "object",
+            "properties": {
+                "supervisors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.SupervisorLinkDTO"
+                    }
+                },
+                "teamId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.SupervisorLinkDTO": {
+            "type": "object",
+            "properties": {
+                "levelId": {
+                    "type": "string"
+                },
+                "levelName": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "string"
+                },
+                "userName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.SupervisorLinkInput": {
+            "type": "object",
+            "required": [
+                "levelId",
+                "userId"
+            ],
+            "properties": {
+                "levelId": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.SurveyHistoryEntry": {
+            "type": "object",
+            "properties": {
+                "assessmentPeriod": {
+                    "type": "string"
+                },
+                "avgScore": {
+                    "type": "number"
+                },
+                "completed": {
+                    "type": "boolean"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "responseCount": {
+                    "type": "integer"
+                },
+                "responses": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.SurveyHistoryResponseItem"
+                    }
+                },
+                "sessionId": {
+                    "type": "string"
+                },
+                "teamId": {
+                    "type": "string"
+                },
+                "teamName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.SurveyHistoryResponse": {
+            "type": "object",
+            "properties": {
+                "surveyHistory": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.SurveyHistoryEntry"
+                    }
+                },
+                "totalSessions": {
+                    "type": "integer"
+                },
+                "userId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.SurveyHistoryResponseItem": {
+            "type": "object",
+            "properties": {
+                "comment": {
+                    "type": "string"
+                },
+                "dimensionId": {
+                    "type": "string"
+                },
+                "dimensionName": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
+                },
+                "trend": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamActionSummaryResponse": {
+            "type": "object",
+            "properties": {
+                "openCount": {
+                    "type": "integer"
+                },
+                "teamId": {
+                    "type": "string"
+                },
+                "teamName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamDashboardHealthSummary": {
+            "type": "object",
+            "properties": {
+                "assessmentPeriod": {
+                    "type": "string"
+                },
+                "dimensions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.DimensionSummary"
+                    }
+                },
+                "overallHealth": {
+                    "type": "number"
+                },
+                "submissionCount": {
+                    "type": "integer"
+                },
+                "teamId": {
+                    "type": "string"
+                },
+                "teamName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamHealthSummary": {
+            "type": "object",
+            "properties": {
+                "dimensions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.DimensionSummary"
+                    }
+                },
+                "overallHealth": {
+                    "type": "number"
+                },
+                "postWorkshopStatus": {
+                    "type": "string"
+                },
+                "submissionCount": {
+                    "type": "integer"
+                },
+                "teamId": {
+                    "type": "string"
+                },
+                "teamName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamInfoResponse": {
+            "type": "object",
+            "properties": {
+                "cadence": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamMember"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "teamLeadId": {
+                    "type": "string"
+                },
+                "teamLeadName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamListResponse": {
+            "type": "object",
+            "properties": {
+                "teams": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamSummary"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamMember": {
+            "type": "object",
+            "properties": {
+                "fullName": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamMemberAdminDTO": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "string"
+                },
+                "userName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamMembersResponse": {
+            "type": "object",
+            "properties": {
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamMemberAdminDTO"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamSubmissionStatusResponse": {
+            "type": "object",
+            "properties": {
+                "allSubmitted": {
+                    "type": "boolean"
+                },
+                "assessmentPeriod": {
+                    "type": "string"
+                },
+                "postWorkshopExists": {
+                    "type": "boolean"
+                },
+                "submittedMembers": {
+                    "type": "integer"
+                },
+                "teamId": {
+                    "type": "string"
+                },
+                "totalMembers": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamSummary": {
+            "type": "object",
+            "properties": {
+                "cadence": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "memberCount": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "teamLeadId": {
+                    "type": "string"
+                },
+                "teamLeadName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamsActionSummaryResponse": {
+            "type": "object",
+            "properties": {
+                "teams": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamActionSummaryResponse"
+                    }
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TeamsResponse": {
+            "type": "object",
+            "properties": {
+                "teams": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.AdminTeamDTO"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.TrendData": {
+            "type": "object",
+            "properties": {
+                "dimensions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.DimensionTrend"
+                    }
+                },
+                "periods": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "teamId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateActionItemRequest": {
+            "type": "object",
+            "properties": {
+                "assessmentPeriod": {
+                    "type": "string"
+                },
+                "assignedTo": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "dimensionId": {
+                    "type": "string"
+                },
+                "dueDate": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 500
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateDimensionRequest": {
+            "type": "object",
+            "properties": {
+                "badDescription": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "goodDescription": {
+                    "type": "string"
+                },
+                "isActive": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "weight": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateHierarchyLevelRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "permissions": {
+                    "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.HierarchyPermissionsDTO"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateHierarchyPositionRequest": {
+            "type": "object",
+            "required": [
+                "newPosition"
+            ],
+            "properties": {
+                "newPosition": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateSupervisorChainRequest": {
+            "type": "object",
+            "required": [
+                "supervisors"
+            ],
+            "properties": {
+                "supervisors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.SupervisorLinkInput"
+                    }
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateTeamRequest": {
+            "type": "object",
+            "properties": {
+                "cadence": {
+                    "type": "string",
+                    "enum": [
+                        "monthly",
+                        "quarterly",
+                        "half-yearly",
+                        "yearly"
+                    ]
+                },
+                "distributionListEmail": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "teamLeadId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.UpdateUserRequest": {
+            "type": "object",
+            "properties": {
+                "authType": {
+                    "type": "string",
+                    "enum": [
+                        "local",
+                        "sso"
+                    ]
+                },
+                "email": {
+                    "type": "string"
+                },
+                "fullName": {
+                    "type": "string"
+                },
+                "hierarchyLevel": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "reportsTo": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.UserDTO": {
+            "type": "object",
+            "properties": {
+                "canTakeSurvey": {
+                    "type": "boolean"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "fullName": {
+                    "type": "string"
+                },
+                "hierarchyLevel": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "teamIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_agopalakrishnan_teams360_backend_interfaces_dto.UsersResponse": {
+            "type": "object",
+            "properties": {
+                "total": {
+                    "type": "integer"
+                },
+                "users": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_agopalakrishnan_teams360_backend_interfaces_dto.AdminUserDTO"
+                    }
+                }
+            }
+        },
+        "interfaces_api_v1.ssoCallbackRequest": {
+            "type": "object",
+            "required": [
+                "code",
+                "code_verifier"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "code_verifier": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Type \"Bearer\" followed by a space and the JWT token.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}
