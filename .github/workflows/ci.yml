@@ -81,15 +81,9 @@ jobs:
       - name: Install swag CLI
         run: go install github.com/swaggo/swag/cmd/swag@latest
 
-      - name: Regenerate Swagger docs
-        run: swag init -g cmd/api/main.go -o docs/swagger --parseDependency --parseInternal
-
-      - name: Fail if docs are out of date
-        run: |
-          if ! git diff --exit-code docs/swagger; then
-            echo "Swagger docs are out of date. Run 'make swagger-gen' and commit the changes."
-            exit 1
-          fi
+      - name: Verify Swagger docs are up to date
+        working-directory: ${{ github.workspace }}
+        run: make swagger-check
 
   backend-test:
     name: Backend Test

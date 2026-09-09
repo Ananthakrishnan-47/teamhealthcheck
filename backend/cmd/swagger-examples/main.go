@@ -1,4 +1,3 @@
-
 // It reads docs/swagger/examples.json (definition name -> field name ->
 // example value) and applies it to docs/swagger/swagger.json,
 // docs/swagger/swagger.yaml, and the embedded spec in docs/swagger/docs.go.
