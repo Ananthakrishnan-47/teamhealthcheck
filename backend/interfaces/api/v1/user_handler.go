@@ -27,8 +27,8 @@ func NewUserHandler(db *sql.DB) *UserHandler {
 // GET /api/v1/users/me (requires JWT auth)
 //
 // @Summary Get the current authenticated user
-// @Description Returns the profile of the currently authenticated user, derived from JWT claims plus a full-name lookup.
-// @Tags users
+// @Description Returns the profile of the caller identified by the bearer token: ID, username, email, hierarchy level, and team IDs taken directly from the JWT claims, with the full name filled in by a database lookup. Returns a 401 if the request carries no valid authenticated session.
+// @Tags Users
 // @Produce json
 // @Success 200 {object} dto.UserDTO
 // @Failure 401 {object} dto.ErrorResponse "User not authenticated"
@@ -78,8 +78,8 @@ func SetupProtectedUserRoutes(router *gin.Engine, db *sql.DB, jwtService *servic
 // GetUserSurveyHistory handles GET /api/v1/users/:userId/survey-history
 //
 // @Summary Get a user's survey history
-// @Description Returns a user's past health check submissions with per-dimension responses, optionally filtered by assessment period and limited in count. Requires same-user-or-manager access.
-// @Tags users
+// @Description Returns the given user's past health check sessions, newest first, each with its team, date, assessment period, completion status, average score, response count, and the full per-dimension responses (dimension name, score, trend, comment). Results can be narrowed to one assessment period and are capped at 10 sessions by default, or by the limit query parameter. Also reports the user's total session count, unaffected by the limit. Access requires the caller to be the same user or their manager.
+// @Tags Users
 // @Produce json
 // @Param userId path string true "User ID"
 // @Param assessmentPeriod query string false "Filter by assessment period"

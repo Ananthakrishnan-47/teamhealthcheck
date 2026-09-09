@@ -27,8 +27,8 @@ func SetupSSORoutes(router *gin.Engine, userRepo user.Repository, jwtService *se
 // GetPublicConfig returns a handler for GET /api/v1/config.
 //
 // @Summary Get public app configuration
-// @Description Returns SSO settings and branding info (company name, logo) so the frontend can render the login page and "Sign in with SSO" button without baking values in at build time. No authentication required.
-// @Tags config
+// @Description Returns the current app environment, company name, and logo URL from stored branding settings, plus SSO configuration (client ID, authorize URL, redirect URI, and scopes) when OAUTH_CLIENT_ID is set on the server, or null for sso when it is not. Lets the frontend render the login page and branding without baking these values in at build time. No authentication is required.
+// @Tags Config
 // @Produce json
 // @Success 200 {object} map[string]interface{} "appEnv, companyName, logoURL, and sso (null or {clientId, authorizeUrl, redirectUri, scopes})"
 // @Router /config [get]

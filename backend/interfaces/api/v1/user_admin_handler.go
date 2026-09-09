@@ -35,8 +35,8 @@ func NewUserAdminHandler(userRepo user.Repository, teamRepo team.Repository) *Us
 // at the database level.
 //
 // @Summary List users
-// @Description Returns a page of users. Requires admin (level-1) role.
-// @Tags admin-users
+// @Description Returns a page of users, including their profile, hierarchy level, reports-to, team IDs, auth type, and timestamps. Supports pagination and filtering by search text and hierarchy level. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Users
 // @Produce json
 // @Param page query int false "Page number, starting at 1" default(1)
 // @Param pageSize query int false "Users per page (max 100)" default(25) maximum(100)
@@ -147,8 +147,8 @@ func parsePositiveIntParam(c *gin.Context, name string, def int) int {
 // CreateUser handles POST /api/v1/admin/users
 //
 // @Summary Create a user
-// @Description Creates a new user (local or SSO auth type). Local users require a password. Requires admin (level-1) role.
-// @Tags admin-users
+// @Description Creates a new user with a username, email, full name, hierarchy level, and optional reports-to supervisor. AuthType defaults to "local" when omitted; local users must supply a password of at least 4 characters, which is bcrypt-hashed before storage, while SSO users get no password hash. The user ID is auto-generated from the username when the caller does not supply one. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Users
 // @Accept json
 // @Produce json
 // @Param body body dto.CreateUserRequest true "User to create"
@@ -234,8 +234,8 @@ func (h *UserAdminHandler) CreateUser(c *gin.Context) {
 // UpdateUser handles PUT /api/v1/admin/users/:id
 //
 // @Summary Update a user
-// @Description Updates a user's profile, role, auth type, and/or password. Re-derives supervisor chains if reportsTo or hierarchy level changes. Requires admin (level-1) role.
-// @Tags admin-users
+// @Description Partially updates the user identified by the path ID; only the fields present in the request body are changed. AuthType, if provided, must be "local" or "sso"; switching an SSO user to local requires a new password in the same request, and a password cannot be set while the account remains SSO. When reportsTo or hierarchy level actually changes, the supervisor chains of every team this user leads or supervises are re-derived. Returns a 404 if no user exists with that ID. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Users
 // @Accept json
 // @Produce json
 // @Param id path string true "User ID"
@@ -370,8 +370,8 @@ func (h *UserAdminHandler) UpdateUser(c *gin.Context) {
 // DeleteUser handles DELETE /api/v1/admin/users/:id
 //
 // @Summary Delete a user
-// @Description Deletes a user. Requires admin (level-1) role.
-// @Tags admin-users
+// @Description Permanently deletes the user identified by the path ID. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Users
 // @Produce json
 // @Param id path string true "User ID"
 // @Success 200 {object} dto.MessageResponse

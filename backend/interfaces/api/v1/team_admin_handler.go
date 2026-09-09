@@ -28,8 +28,8 @@ func NewTeamAdminHandler(teamRepo team.Repository, userRepo user.Repository, org
 // ListTeams handles GET /api/v1/admin/teams
 //
 // @Summary List all teams (admin)
-// @Description Returns all teams with full admin details (team lead, cadence, distribution list, member count). Requires admin (level-1) role.
-// @Tags admin-teams
+// @Description Returns every team in the organization with the full set of admin-facing details: ID, name, team lead ID and name, cadence, distribution list email, member count, and timestamps, along with the total team count. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Teams
 // @Produce json
 // @Success 200 {object} dto.TeamsResponse
 // @Failure 500 {object} dto.ErrorResponse "Failed to query teams"
@@ -70,8 +70,8 @@ func (h *TeamAdminHandler) ListTeams(c *gin.Context) {
 // CreateTeam handles POST /api/v1/admin/teams
 //
 // @Summary Create a team
-// @Description Creates a new team. If a team lead is set, the supervisor chain is auto-derived from their reports-to hierarchy. Requires admin (level-1) role.
-// @Tags admin-teams
+// @Description Creates a new team with a name, cadence, and optional team lead and distribution list email. The team ID is auto-generated from the name when the caller does not supply one. When a team lead is set, the team's supervisor chain is automatically derived by walking that lead's reports-to hierarchy. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Teams
 // @Accept json
 // @Produce json
 // @Param body body dto.CreateTeamRequest true "Team to create"
@@ -144,8 +144,8 @@ func (h *TeamAdminHandler) CreateTeam(c *gin.Context) {
 // UpdateTeam handles PUT /api/v1/admin/teams/:id
 //
 // @Summary Update a team
-// @Description Updates a team's name, lead, cadence, and/or distribution list email. Re-derives (or clears) the supervisor chain if the team lead changes. Requires admin (level-1) role.
-// @Tags admin-teams
+// @Description Updates the name, team lead, cadence, and/or distribution list email of the team identified by the path ID; only the fields present in the request body are changed. If the team lead changes, the supervisor chain is re-derived from the new lead's reports-to hierarchy, or cleared entirely if the lead is removed. Returns a 404 if no team exists with that ID. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Teams
 // @Accept json
 // @Produce json
 // @Param id path string true "Team ID"
@@ -246,8 +246,8 @@ func (h *TeamAdminHandler) UpdateTeam(c *gin.Context) {
 // DeleteTeam handles DELETE /api/v1/admin/teams/:id
 //
 // @Summary Delete a team
-// @Description Deletes a team. Requires admin (level-1) role.
-// @Tags admin-teams
+// @Description Permanently deletes the team identified by the path ID. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Teams
 // @Produce json
 // @Param id path string true "Team ID"
 // @Success 200 {object} dto.MessageResponse
@@ -271,8 +271,8 @@ func (h *TeamAdminHandler) DeleteTeam(c *gin.Context) {
 // GetTeamMembers handles GET /api/v1/admin/teams/:id/members
 //
 // @Summary List a team's members (admin)
-// @Description Returns the members of a team. Requires admin (level-1) role.
-// @Tags admin-teams
+// @Description Returns every member of the team identified by the path ID, each with their user ID, name, and email, plus the total member count. Returns a 404 if no team exists with that ID. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Teams
 // @Produce json
 // @Param id path string true "Team ID"
 // @Success 200 {object} dto.TeamMembersResponse
@@ -317,8 +317,8 @@ func (h *TeamAdminHandler) GetTeamMembers(c *gin.Context) {
 // AddTeamMember handles POST /api/v1/admin/teams/:id/members
 //
 // @Summary Add a member to a team
-// @Description Adds a user as a member of a team. Requires admin (level-1) role.
-// @Tags admin-teams
+// @Description Adds the given user as a member of the team identified by the path ID. Returns a 404 if either the team or the user does not exist. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Teams
 // @Accept json
 // @Produce json
 // @Param id path string true "Team ID"
@@ -366,8 +366,8 @@ func (h *TeamAdminHandler) AddTeamMember(c *gin.Context) {
 // RemoveTeamMember handles DELETE /api/v1/admin/teams/:id/members/:userId
 //
 // @Summary Remove a member from a team
-// @Description Removes a user from a team's membership. Requires admin (level-1) role.
-// @Tags admin-teams
+// @Description Removes the given user's membership from the team identified by the path ID. Returns a 404 if the user is not currently a member of that team. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Teams
 // @Produce json
 // @Param id path string true "Team ID"
 // @Param userId path string true "User ID"
@@ -398,8 +398,8 @@ func (h *TeamAdminHandler) RemoveTeamMember(c *gin.Context) {
 // GetSupervisorChain handles GET /api/v1/admin/teams/:id/supervisors
 //
 // @Summary Get a team's supervisor chain
-// @Description Returns the team's supervisor chain (derived from the team lead's reports-to hierarchy), enriched with user and level names. Requires admin (level-1) role.
-// @Tags admin-teams
+// @Description Returns the stored supervisor chain for the team identified by the path ID (originally derived from the team lead's reports-to hierarchy), with each link enriched with the supervisor's name and hierarchy level name. Returns a 404 if no team exists with that ID. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Teams
 // @Produce json
 // @Param id path string true "Team ID"
 // @Success 200 {object} dto.SupervisorChainResponse
@@ -456,8 +456,8 @@ func (h *TeamAdminHandler) GetSupervisorChain(c *gin.Context) {
 // UpdateSupervisorChain handles PUT /api/v1/admin/teams/:id/supervisors
 //
 // @Summary Replace a team's supervisor chain
-// @Description Overwrites the team's supervisor chain with the given list. Requires admin (level-1) role.
-// @Tags admin-teams
+// @Description Replaces the entire supervisor chain of the team identified by the path ID with the given list of user/level links, discarding whatever chain was previously derived or set. Returns the updated chain enriched with supervisor and level names. Returns a 404 if no team exists with that ID. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Tags Admin Teams
 // @Accept json
 // @Produce json
 // @Param id path string true "Team ID"

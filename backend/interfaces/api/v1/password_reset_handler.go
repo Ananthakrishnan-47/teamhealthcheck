@@ -26,8 +26,8 @@ func NewPasswordResetHandler(resetService *services.PasswordResetService, userRe
 // ForgotPassword handles forgot password requests
 //
 // @Summary Request a password reset email
-// @Description Creates a password reset token and emails a reset link. Always returns success (even for unknown emails) to prevent email enumeration. Public endpoint.
-// @Tags auth
+// @Description Validates the submitted email format and, if a matching account exists, creates a password reset token and emails a reset link to it. The response message is identical whether or not the email is registered, so the endpoint cannot be used to discover which addresses have accounts. This is a public endpoint that requires no authentication.
+// @Tags Auth
 // @Accept json
 // @Produce json
 // @Param body body dto.ForgotPasswordRequest true "Email address"
@@ -65,8 +65,8 @@ func (h *PasswordResetHandler) ForgotPassword(c *gin.Context) {
 // ResetPassword handles password reset with token
 //
 // @Summary Reset password using a reset token
-// @Description Resets a user's password given a valid reset token. Public endpoint.
-// @Tags auth
+// @Description Sets a new password for the account tied to the given reset token, after checking the token is present, unexpired, and unused, and that the new password is at least 8 characters. Returns a 401 if the token is invalid or expired. This is a public endpoint that relies on the reset token itself for authorization rather than a bearer session.
+// @Tags Auth
 // @Accept json
 // @Produce json
 // @Param body body dto.ResetPasswordRequest true "Reset token and new password"

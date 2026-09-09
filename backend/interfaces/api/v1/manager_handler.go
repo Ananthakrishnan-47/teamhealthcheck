@@ -29,9 +29,9 @@ func NewManagerHandler(healthCheckRepo healthcheck.Repository, trendsService *tr
 
 // GetManagerTeamsHealth handles GET /api/v1/managers/:managerId/teams/health
 //
-// @Summary Get aggregated team health for a manager
-// @Description Returns per-team health summaries (submission count, overall health, per-dimension averages) for all teams supervised by the given manager. Requires manager-or-above role and same-user-or-manager access.
-// @Tags managers
+// @Summary Get team health for manager
+// @Description Returns a health summary for every team supervised by the given manager, optionally narrowed to one assessment period via a query parameter. Each team summary includes its submission count, overall health score, per-dimension averages with response counts, and post-workshop survey status. Access requires a manager-or-above role; the caller may view their own data, and callers with a director-or-above role (level-2 or level-1) may also view any other manager's data.
+// @Tags Managers
 // @Produce json
 // @Param managerId path string true "Manager ID"
 // @Param assessmentPeriod query string false "Filter by assessment period"
@@ -97,9 +97,9 @@ func (h *ManagerHandler) GetManagerTeamsHealth(c *gin.Context) {
 // GetManagerAggregatedRadar handles GET /api/v1/managers/:managerId/dashboard/radar
 // Returns aggregated radar chart data across all supervised teams
 //
-// @Summary Get aggregated radar chart data for a manager
-// @Description Returns aggregated per-dimension average scores across all teams supervised by the given manager, for a radar chart. Requires manager-or-above role and same-user-or-manager access.
-// @Tags managers
+// @Summary Get radar chart data for manager
+// @Description Returns the average score and response count for each health dimension, aggregated across every team supervised by the given manager, optionally narrowed to one assessment period via a query parameter. Shaped for rendering a radar chart on the manager dashboard. Access requires a manager-or-above role; the caller may view their own data, and callers with a director-or-above role (level-2 or level-1) may also view any other manager's data.
+// @Tags Managers
 // @Produce json
 // @Param managerId path string true "Manager ID"
 // @Param assessmentPeriod query string false "Filter by assessment period"
@@ -151,9 +151,9 @@ func (h *ManagerHandler) GetManagerAggregatedRadar(c *gin.Context) {
 // GetManagerTrends handles GET /api/v1/managers/:managerId/dashboard/trends
 // Returns trend data across assessment periods for all supervised teams
 //
-// @Summary Get trend data for a manager's supervised teams
-// @Description Returns per-dimension trend data across assessment periods, aggregated over all teams supervised by the given manager. Requires manager-or-above role and same-user-or-manager access.
-// @Tags managers
+// @Summary Get trend data for supervised teams
+// @Description Returns the list of assessment periods and, for each health dimension, the average score in each of those periods, aggregated across every team the given manager supervises. Used to render trend lines on the manager dashboard. Access requires a manager-or-above role; the caller may view their own data, and callers with a director-or-above role (level-2 or level-1) may also view any other manager's data.
+// @Tags Managers
 // @Produce json
 // @Param managerId path string true "Manager ID"
 // @Success 200 {object} dto.ManagerTrendsResponse
@@ -199,8 +199,8 @@ func (h *ManagerHandler) GetManagerTrends(c *gin.Context) {
 // Returns the full subordinate tree for org hierarchy display
 //
 // @Summary Get a manager's subordinates
-// @Description Returns the full subordinate tree (direct and indirect reports) for the given manager, for org hierarchy display. Requires manager-or-above role and same-user-or-manager access.
-// @Tags managers
+// @Description Returns every direct and indirect report of the given manager as a flat list, each entry carrying the subordinate's ID, username, name, hierarchy level, immediate supervisor, and team memberships, for rendering the org hierarchy view. Access requires a manager-or-above role; the caller may view their own subordinates, and callers with a director-or-above role (level-2 or level-1) may also view another manager's subordinates.
+// @Tags Managers
 // @Produce json
 // @Param managerId path string true "Manager ID"
 // @Success 200 {object} dto.SubordinatesResponse

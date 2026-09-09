@@ -35,8 +35,8 @@ func NewAuthHandler(userRepo user.Repository, orgRepo organization.Repository, j
 // Login handles user authentication
 //
 // @Summary Log in with username and password
-// @Description Authenticates a local user via username/password and issues a JWT access/refresh token pair. Public endpoint — SSO users cannot log in here.
-// @Tags auth
+// @Description Authenticates a local user by username and password and, on success, issues a JWT access/refresh token pair. The response includes the user's profile (ID, username, email, full name, hierarchy level, team IDs, and whether they can take the survey) alongside the access token, refresh token, and access-token expiry in seconds. This is a public endpoint that does not require a prior session; SSO users are rejected and must sign in through their identity provider instead.
+// @Tags Auth
 // @Accept json
 // @Produce json
 // @Param body body dto.LoginRequest true "Login credentials"
@@ -194,8 +194,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // Refresh handles token refresh requests
 //
 // @Summary Refresh an access token
-// @Description Exchanges a valid refresh token for a new access token. Public endpoint.
-// @Tags auth
+// @Description Validates the supplied refresh token, reloads the current user record, and issues a new access token without rotating the refresh token. Returns the new access token and its expiry in seconds. Fails with a 401 when the refresh token is invalid or expired, or when the associated user no longer exists. This is a public endpoint that relies on the refresh token itself for authorization rather than a bearer session.
+// @Tags Auth
 // @Accept json
 // @Produce json
 // @Param body body dto.RefreshTokenRequest true "Refresh token"
@@ -321,8 +321,8 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 // Logout handles user logout (token invalidation)
 //
 // @Summary Log out
-// @Description Logs the user out. For stateless JWT, this is handled client-side by discarding tokens; the endpoint records the logout event. Public endpoint (works with or without a valid session).
-// @Tags auth
+// @Description Ends the caller's session. Because authentication is stateless JWT, no token is invalidated server-side; the client is expected to discard its access and refresh tokens on receiving a successful response. The endpoint still records the logout event for auditing and telemetry, and it accepts the request whether or not a valid bearer token is present.
+// @Tags Auth
 // @Produce json
 // @Success 200 {object} map[string]string "message"
 // @Router /auth/logout [post]

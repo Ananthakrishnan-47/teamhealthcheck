@@ -29,8 +29,8 @@ func NewTeamDashboardHandler(db *sql.DB) *TeamDashboardHandler {
 // Returns radar chart data (avg score per dimension)
 //
 // @Summary Get team health summary
-// @Description Returns radar chart data: overall health and per-dimension average scores for a team, optionally filtered by assessment period. Requires team membership.
-// @Tags team-dashboard
+// @Description Returns the data behind the team's health radar chart: completed-session count, overall average score across all responses, and the average score plus response count for each dimension, computed only from completed sessions and optionally narrowed to one assessment period via a query parameter. Returns a 404 if the team does not exist. Access requires membership on the team.
+// @Tags Team Dashboard
 // @Produce json
 // @Param teamId path string true "Team ID"
 // @Param assessmentPeriod query string false "Filter by assessment period"
@@ -169,8 +169,8 @@ func (h *TeamDashboardHandler) GetHealthSummary(c *gin.Context) {
 // Returns score distribution per dimension (red/yellow/green counts for bar chart)
 //
 // @Summary Get team response distribution
-// @Description Returns red/yellow/green score counts per dimension for a bar chart, optionally filtered by assessment period. Requires team membership.
-// @Tags team-dashboard
+// @Description Returns, for each dimension the team has scored, how many completed responses landed on red (1), yellow (2), and green (3), for rendering the team's response-distribution bar chart. Results can be narrowed to one assessment period via a query parameter. Access requires membership on the team.
+// @Tags Team Dashboard
 // @Produce json
 // @Param teamId path string true "Team ID"
 // @Param assessmentPeriod query string false "Filter by assessment period"
@@ -248,8 +248,8 @@ func (h *TeamDashboardHandler) GetResponseDistribution(c *gin.Context) {
 // Returns individual team member responses with comments
 //
 // @Summary Get individual team member responses
-// @Description Returns individual (non-anonymized) team member survey responses with per-dimension scores and comments, optionally filtered by assessment period. Requires team membership.
-// @Tags team-dashboard
+// @Description Returns each completed survey session for the team with the submitting member's identity attached (not anonymized), newest first, including per-dimension score, trend, and comment. Results can be narrowed to one assessment period via a query parameter. Access requires membership on the team.
+// @Tags Team Dashboard
 // @Produce json
 // @Param teamId path string true "Team ID"
 // @Param assessmentPeriod query string false "Filter by assessment period"
@@ -371,8 +371,8 @@ func (h *TeamDashboardHandler) GetIndividualResponses(c *gin.Context) {
 // Returns trend data across assessment periods
 //
 // @Summary Get team trend data
-// @Description Returns per-dimension trend data across assessment periods for a team. Requires team membership.
-// @Tags team-dashboard
+// @Description Returns the list of assessment periods the team has data for and, for each health dimension, the average score in each of those periods, for rendering the team's trend chart. Access requires membership on the team.
+// @Tags Team Dashboard
 // @Produce json
 // @Param teamId path string true "Team ID"
 // @Success 200 {object} dto.TrendData

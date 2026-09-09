@@ -58,8 +58,8 @@ func NewHealthCheckHandler(repository healthcheck.Repository, orgRepo organizati
 // SubmitHealthCheck handles POST /api/v1/health-checks
 //
 // @Summary Submit a health check session
-// @Description Submits a team member's health check responses for an assessment period. Fires an async email notification on success.
-// @Tags health-checks
+// @Description Records a team member's health check responses (one score, trend, and optional comment per dimension) for a team and assessment period. The submission date must not be in the future, and the assessment period, if supplied, must match one of the supported formats (e.g. "YYYY - 1st Half", "YYYY Q1", "YYYY H1", "YYYY", or "YYYY Mon") and must not fall in the future. On success, an email notification is sent asynchronously: an individual survey email for a regular submission, or post-workshop emails when surveyType is "post-workshop".
+// @Tags Health Checks
 // @Accept json
 // @Produce json
 // @Param body body dto.SubmitHealthCheckRequest true "Health check submission"
@@ -214,8 +214,8 @@ func (h *HealthCheckHandler) SubmitHealthCheck(c *gin.Context) {
 // GetHealthDimensions handles GET /api/v1/health-dimensions
 //
 // @Summary List active health dimensions
-// @Description Returns the currently active health dimensions used to build the survey (e.g. Mission, Speed, Fun).
-// @Tags health-checks
+// @Description Returns the health dimensions currently marked active, which is the set used to build the survey form (e.g. Mission, Speed, Fun). Inactive dimensions are omitted. Each entry includes the dimension's ID, name, description, good/bad anchor descriptions, active flag, and weight.
+// @Tags Health Checks
 // @Produce json
 // @Success 200 {object} dto.HealthDimensionsResponse
 // @Failure 500 {object} dto.ErrorResponse "Failed to fetch dimensions"
@@ -270,9 +270,9 @@ func (h *HealthCheckHandler) GetHealthDimensions(c *gin.Context) {
 
 // GetHealthCheckByID handles GET /api/v1/health-checks/:id
 //
-// @Summary Get a health check session by ID
-// @Description Returns a single health check session and its dimension responses.
-// @Tags health-checks
+// @Summary Get a health check session
+// @Description Returns the health check session identified by the path ID, including its team, submitting user, date, assessment period, survey type, completion flag, and the full list of per-dimension responses (score, trend, comment). Returns a 404 if no session exists with that ID.
+// @Tags Health Checks
 // @Produce json
 // @Param id path string true "Health check session ID"
 // @Success 200 {object} dto.HealthCheckSessionResponse
@@ -310,8 +310,8 @@ func (h *HealthCheckHandler) GetHealthCheckByID(c *gin.Context) {
 // GetTeamHealthChecks handles GET /api/v1/health-checks/team/:id
 //
 // @Summary List a team's health check sessions
-// @Description Returns all health check sessions submitted for a team, optionally filtered by assessment period.
-// @Tags health-checks
+// @Description Returns every health check session submitted for the given team, each with its full per-dimension responses, optionally narrowed to a single assessment period via a query parameter. The response also reports the total number of sessions returned.
+// @Tags Health Checks
 // @Produce json
 // @Param id path string true "Team ID"
 // @Param assessmentPeriod query string false "Filter by assessment period (e.g. '2024 - 1st Half')"
@@ -373,9 +373,9 @@ func (h *HealthCheckHandler) GetTeamHealthChecks(c *gin.Context) {
 
 // GetTeamSubmissionStatus handles GET /api/v1/teams/:teamId/submission-status
 //
-// @Summary Get a team's submission status for a period
-// @Description Returns how many team members have submitted a health check for the given assessment period, and whether a post-workshop survey exists.
-// @Tags health-checks
+// @Summary Get team's submission status
+// @Description Returns the submission progress for the given team and assessment period (both required query/path values): total team members, how many have submitted, whether every member has submitted, and whether a post-workshop survey exists for that period. Fails with a 400 if either the team ID or assessment period is missing.
+// @Tags Health Checks
 // @Produce json
 // @Param teamId path string true "Team ID"
 // @Param assessmentPeriod query string true "Assessment period (e.g. '2024 - 1st Half')"
@@ -425,8 +425,8 @@ func (h *HealthCheckHandler) GetTeamSubmissionStatus(c *gin.Context) {
 // GetAssessmentPeriods handles GET /api/v1/assessment-periods
 //
 // @Summary List distinct assessment periods
-// @Description Returns the distinct assessment periods that have submitted health check data, for populating dropdowns.
-// @Tags health-checks
+// @Description Returns the distinct assessment period values that appear on at least one submitted health check session, for populating period-selector dropdowns in the frontend.
+// @Tags Health Checks
 // @Produce json
 // @Success 200 {object} map[string][]string "periods"
 // @Failure 500 {object} dto.ErrorResponse "Failed to fetch assessment periods"

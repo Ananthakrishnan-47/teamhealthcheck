@@ -29,6 +29,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.40.0
 	go.opentelemetry.io/otel/trace v1.40.0
 	golang.org/x/crypto v0.45.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -97,7 +98,6 @@ require (
 	google.golang.org/grpc v1.75.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 // Local development: resolve module to current directory

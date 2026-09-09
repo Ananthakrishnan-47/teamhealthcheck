@@ -262,7 +262,8 @@ swagger-gen: ## [Backend] Regenerate Swagger/OpenAPI docs from annotations
 		echo "  go install github.com/swaggo/swag/cmd/swag@latest"; \
 		exit 1; \
 	}
-	@cd backend && swag init -g cmd/api/main.go -o docs/swagger --parseDependency --parseInternal
+	@cd backend && swag init -g cmd/api/main.go -o docs/swagger --parseInternal
+	@cd backend && go run ./cmd/swagger-examples
 	@echo "$(GREEN)Swagger docs generated: backend/docs/swagger$(RESET)"
 
 swagger-check: swagger-gen ## [Backend] Verify Swagger docs are up to date (fails if generation causes a diff)

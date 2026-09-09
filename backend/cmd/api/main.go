@@ -371,7 +371,7 @@ func main() {
 //
 // @Summary Liveness check
 // @Description Returns 200 with a simple status payload. Used by tests and load balancers. Public endpoint.
-// @Tags health
+// @Tags Health
 // @Produce json
 // @Success 200 {object} map[string]string "status"
 // @Router /health [get]
