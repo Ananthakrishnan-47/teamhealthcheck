@@ -608,6 +608,12 @@ export default function SurveyCompletionDashboard() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [reminderPlan, setReminderPlan] = useState<ReminderPlan | null>(null);
+  // The period this component has already fetched data for. Lets the effect
+  // below tell "the backend just told us its auto-resolved default" (skip —
+  // we already have that data) apart from "the user picked a new period"
+  // (fetch for real), even though both look identical from the dependency
+  // array's point of view: timePeriod changing.
+  const lastFetchedPeriod = useRef<string | undefined>(undefined);
 
   // Load the list of assessment periods once, for the period dropdown.
   useEffect(() => {
@@ -620,6 +626,14 @@ export default function SurveyCompletionDashboard() {
   // `undefined` lets the backend pick the most recent period with data,
   // which is also how the period dropdown gets its initial selection.
   useEffect(() => {
+    // The initial fetch (timePeriod undefined) resolves the default period
+    // and stores it via setTimePeriod below, which re-runs this effect. If
+    // that resolved period is exactly what we just fetched, this run is that
+    // echo, not a real period change — skip the redundant refetch.
+    if (timePeriod !== undefined && lastFetchedPeriod.current === timePeriod) {
+      return;
+    }
+
     let cancelled = false;
     setIsLoading(true);
     setError(null);
@@ -636,6 +650,7 @@ export default function SurveyCompletionDashboard() {
     getSurveyCompletion(timePeriod)
       .then((data) => {
         if (cancelled) return;
+        lastFetchedPeriod.current = data.assessmentPeriod;
         setOverview(data);
         setTimePeriod((current) => current ?? data.assessmentPeriod);
       })

@@ -51,11 +51,18 @@ var protectedUserIDs = map[string]bool{
 	"e2e_fresh_member": true,
 }
 
-// protectedTeamIDs are the fixed demo teams created by SeedDemoData. Same
-// closed-set reasoning as protectedUserIDs.
+// protectedTeamIDs are the fixed demo teams created by SeedDemoData, plus the
+// E2E acceptance-suite fixture teams. Same closed-set reasoning as
+// protectedUserIDs -- and the E2E entries are the counterpart to the E2E user
+// cast protected above: those users' memberships live in these teams, so
+// protecting the people without protecting their teams would still let a sync
+// delete the teams and cascade the memberships away.
 var protectedTeamIDs = map[string]bool{
+	// Core demo cast
 	"team-phoenix": true, "team-dragon": true, "team-titan": true,
 	"team-falcon": true, "team-eagle": true, "team-nova": true,
+	// E2E acceptance-test cast (tests/acceptance/suite_test.go)
+	"e2e_team1": true, "e2e_team2": true, "e2e_team3": true,
 }
 
 // IsProtectedUser reports whether a user must never be created, updated, or

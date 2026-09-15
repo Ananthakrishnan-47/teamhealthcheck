@@ -298,13 +298,6 @@ func (r *UserRepository) FindAll(ctx context.Context) ([]*user.User, error) {
 			u.UpdatedAt = updatedAt.Time
 		}
 
-		// Fetch team IDs
-		teamIDs, err := r.fetchTeamIDs(ctx, u.ID)
-		if err != nil {
-			return nil, err
-		}
-		u.TeamIDs = teamIDs
-
 		// Check if user is admin
 		u.IsAdmin = u.Username == "admin"
 
@@ -313,6 +306,43 @@ func (r *UserRepository) FindAll(ctx context.Context) ([]*user.User, error) {
 
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	// Batch-load every user's team memberships in one query instead of one
+	// round trip per user — with thousands of users, a per-user loop here
+	// turns a sub-second query into several seconds.
+	if len(users) > 0 {
+		userIDs := make([]string, len(users))
+		userMap := make(map[string]*user.User, len(users))
+		for i, u := range users {
+			userIDs[i] = u.ID
+			userMap[u.ID] = u
+			u.TeamIDs = []string{}
+		}
+
+		teamRows, err := r.db.QueryContext(ctx, `
+			SELECT user_id, team_id
+			FROM team_members
+			WHERE user_id = ANY($1)
+			ORDER BY user_id, team_id
+		`, pq.Array(userIDs))
+		if err != nil {
+			return nil, fmt.Errorf("failed to batch-load team memberships: %w", err)
+		}
+		defer teamRows.Close()
+
+		for teamRows.Next() {
+			var userID, teamID string
+			if err := teamRows.Scan(&userID, &teamID); err != nil {
+				return nil, fmt.Errorf("failed to scan team membership: %w", err)
+			}
+			if u, ok := userMap[userID]; ok {
+				u.TeamIDs = append(u.TeamIDs, teamID)
+			}
+		}
+		if err := teamRows.Err(); err != nil {
+			return nil, fmt.Errorf("team rows error: %w", err)
+		}
 	}
 
 	return users, nil
