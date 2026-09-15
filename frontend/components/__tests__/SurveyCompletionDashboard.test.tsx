@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SurveyCompletionDashboard, { GroupHeaderRow, TeamRow } from '@/components/SurveyCompletionDashboard';
@@ -710,6 +710,69 @@ describe('SurveyCompletionDashboard period switch', () => {
     expect(errorState.textContent).toContain('Unknown assessment period');
     // The old period's data must not still be rendered behind/alongside the error.
     expect(screen.queryByTestId('survey-card-total')).not.toBeInTheDocument();
+  });
+});
+
+// The bulk "Remind N pending pods" button should only appear for filters
+// scoped to pods that could plausibly still need a nudge (Opted In, In
+// Progress, Not Started), and must react immediately to filter switches
+// without a page refresh -- see showRemindButton in the component.
+describe('SurveyCompletionDashboard — bulk Remind button visibility per filter', () => {
+  beforeEach(() => {
+    vi.mocked(getAssessmentPeriods).mockResolvedValue(['2026 H1']);
+    vi.mocked(getSurveyCompletion).mockResolvedValue(overview({ assessmentPeriod: '2026 H1' }));
+  });
+
+  it('is hidden under the default Total Teams filter', async () => {
+    render(<SurveyCompletionDashboard />);
+    await screen.findByTestId('survey-card-total');
+    expect(screen.queryByTestId('survey-remind-all')).not.toBeInTheDocument();
+  });
+
+  it('shows under Opted In', async () => {
+    render(<SurveyCompletionDashboard />);
+    await screen.findByTestId('survey-card-total');
+    await userEvent.click(screen.getByTestId('survey-card-opted-in'));
+    expect(screen.getByTestId('survey-remind-all')).toBeInTheDocument();
+  });
+
+  it('shows under In Progress', async () => {
+    render(<SurveyCompletionDashboard />);
+    await screen.findByTestId('survey-card-total');
+    await userEvent.click(screen.getByTestId('survey-card-in-progress'));
+    expect(screen.getByTestId('survey-remind-all')).toBeInTheDocument();
+  });
+
+  it('shows under Not Started', async () => {
+    render(<SurveyCompletionDashboard />);
+    await screen.findByTestId('survey-card-total');
+    await userEvent.click(screen.getByTestId('survey-card-not-started'));
+    expect(screen.getByTestId('survey-remind-all')).toBeInTheDocument();
+  });
+
+  it('is hidden under Opted Out', async () => {
+    render(<SurveyCompletionDashboard />);
+    await screen.findByTestId('survey-card-total');
+    await userEvent.click(screen.getByTestId('survey-card-opted-out'));
+    expect(screen.queryByTestId('survey-remind-all')).not.toBeInTheDocument();
+  });
+
+  it('is hidden under Fully Complete', async () => {
+    render(<SurveyCompletionDashboard />);
+    await screen.findByTestId('survey-card-total');
+    await userEvent.click(screen.getByTestId('survey-card-complete'));
+    expect(screen.queryByTestId('survey-remind-all')).not.toBeInTheDocument();
+  });
+
+  it('is hidden again immediately after switching back to Total Teams, with no refresh', async () => {
+    render(<SurveyCompletionDashboard />);
+    await screen.findByTestId('survey-card-total');
+
+    await userEvent.click(screen.getByTestId('survey-card-in-progress'));
+    expect(screen.getByTestId('survey-remind-all')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('survey-card-total'));
+    expect(screen.queryByTestId('survey-remind-all')).not.toBeInTheDocument();
   });
 });
 

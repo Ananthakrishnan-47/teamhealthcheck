@@ -784,6 +784,15 @@ export default function SurveyCompletionDashboard() {
   // isRowBackgroundHiddenFor, the single shared rule for this).
   const showPercentBadge = isRowBackgroundHiddenFor(activeFilter);
 
+  // The bulk "Remind N pending pods" button only makes sense while looking
+  // at pods that could plausibly still need a nudge: Opted In, In Progress,
+  // Not Started. Under Total Teams / Opted Out / Fully Complete it hides
+  // entirely rather than showing (and disabling) — those filters either
+  // aren't scoped to pending pods at all (Total Teams) or can never contain
+  // one (Opted Out, Fully Complete).
+  const showRemindButton =
+    activeFilter === "optedIn" || activeFilter === "in_progress" || activeFilter === "not_started";
+
   const isGroupExpanded = (key: string) => searchActive || expandedGroups.has(key);
 
   return (
@@ -932,16 +941,18 @@ export default function SurveyCompletionDashboard() {
                 className="w-full sm:w-56 pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               />
             </div>
-            <button
-              type="button"
-              onClick={() => setReminderPlan(orgReminderPlan)}
-              disabled={orgReminderPlan.podCount === 0}
-              data-testid="survey-remind-all"
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            >
-              <Send className="w-4 h-4" />
-              Remind {orgReminderPlan.podCount} pending pod{orgReminderPlan.podCount === 1 ? "" : "s"}
-            </button>
+            {showRemindButton && (
+              <button
+                type="button"
+                onClick={() => setReminderPlan(orgReminderPlan)}
+                disabled={orgReminderPlan.podCount === 0}
+                data-testid="survey-remind-all"
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+              >
+                <Send className="w-4 h-4" />
+                Remind {orgReminderPlan.podCount} pending pod{orgReminderPlan.podCount === 1 ? "" : "s"}
+              </button>
+            )}
           </div>
         </div>
 
