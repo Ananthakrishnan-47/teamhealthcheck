@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 
 	"github.com/agopalakrishnan/teams360/backend/application/services"
 	"github.com/agopalakrishnan/teams360/backend/infrastructure/dataprovider"
 	"github.com/agopalakrishnan/teams360/backend/infrastructure/persistence/postgres"
 	v1 "github.com/agopalakrishnan/teams360/backend/interfaces/api/v1"
+	"github.com/agopalakrishnan/teams360/backend/interfaces/dto"
 	"github.com/agopalakrishnan/teams360/backend/tests/testhelpers"
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
@@ -74,6 +76,21 @@ var _ = Describe("Integration: Organization Provider Sync", func() {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		return w
+	}
+
+	// doSyncWithBody posts the optional request body the override travels in.
+	doSyncWithBody := func(token, body string) *httptest.ResponseRecorder {
+		req, err := http.NewRequest(http.MethodPost, "/api/v1/admin/organization-provider/sync", strings.NewReader(body))
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	doOverrideSync := func(token string) *httptest.ResponseRecorder {
+		return doSyncWithBody(token, `{"overrideMassDeletion": true}`)
 	}
 
 	getSettings := func(token string) *httptest.ResponseRecorder {
@@ -636,6 +653,249 @@ var _ = Describe("Integration: Organization Provider Sync", func() {
 			w := doSync(adminToken)
 			Expect(w.Code).To(Equal(http.StatusOK))
 			Expect(w.Body.String()).NotTo(ContainSubstring(providerAPIToken))
+		})
+	})
+
+	// The guard is what stops a bad snapshot from emptying the org; the override
+	// is the one deliberate way past it. These specs pin down both halves: what
+	// a held sync reports (and that it reports it without writing), and exactly
+	// how much an override is allowed to waive.
+	Describe("Mass-deletion hold and admin override", func() {
+		// seedBulkUsers creates non-protected users absent from every snapshot
+		// this suite serves, so they are all deletion candidates. With the
+		// threshold pinned to 1% below, any one of them trips the guard.
+		seedBulkUsers := func(n int) {
+			for i := 0; i < n; i++ {
+				name := "sync-bulk-" + string(rune('a'+i))
+				_, err := db.Exec(`
+					INSERT INTO users (id, username, email, full_name, hierarchy_level_id, password_hash)
+					VALUES ($1, $1, $2, $1, 'level-5', '')
+				`, name, name+"@test.com")
+				Expect(err).NotTo(HaveOccurred())
+			}
+		}
+
+		decodeHold := func(w *httptest.ResponseRecorder) dto.MassDeletionHoldResponseDTO {
+			var body dto.MassDeletionHoldResponseDTO
+			Expect(json.Unmarshal(w.Body.Bytes(), &body)).To(Succeed(), w.Body.String())
+			return body
+		}
+
+		BeforeEach(func() {
+			// A strict threshold makes the guard trip on this suite's small
+			// fixture populations. The production default (20%) is untouched.
+			os.Setenv(services.EnvMaxDeletePercent, "1")
+		})
+
+		AfterEach(func() {
+			os.Setenv(services.EnvMaxDeletePercent, "100")
+		})
+
+		It("should report the deletion counts, percentages and threshold when it holds a sync", func() {
+			seedBulkUsers(5)
+			_, err := db.Exec(`INSERT INTO teams (id, name) VALUES ('sync-doomed-team', 'Doomed')`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = db.Exec(`INSERT INTO team_members (team_id, user_id) VALUES ('sync-doomed-team', 'sync-bulk-a')`)
+			Expect(err).NotTo(HaveOccurred())
+
+			w := doSync(adminToken)
+			Expect(w.Code).To(Equal(http.StatusConflict), w.Body.String())
+
+			body := decodeHold(w)
+			Expect(body.Code).To(Equal(dto.CodeMassDeletionHold), "the UI recognises a hold by its typed code, not by message text")
+			Expect(body.Applied).To(BeFalse())
+			Expect(body.MassDeletion).NotTo(BeNil())
+
+			report := body.MassDeletion
+			Expect(report.Threshold).To(Equal(1.0))
+
+			// 5 eligible users exist, all 5 are absent from the snapshot.
+			Expect(report.Users.Existing).To(Equal(5), "the denominator is the eligible existing population")
+			Expect(report.Users.Deleting).To(Equal(5), "the numerator is what the sync proposes to delete")
+			Expect(report.Users.Percent).To(Equal(100.0))
+			Expect(report.Users.Kind).To(Equal("deleted"))
+			Expect(report.Users.ContributesToHold).To(BeTrue())
+			Expect(report.Users.ExceedsThreshold).To(BeTrue())
+			// The diagnostic half of the report: what the provider actually sent.
+			// snapshotWithLevels carries 4 users, of which 2 are importable.
+			Expect(report.Users.Incoming).To(Equal(2), "incoming counts the importable records the provider supplied")
+
+			// Only sync-doomed-team exists and it is absent from the snapshot.
+			Expect(report.Teams.Existing).To(Equal(1))
+			Expect(report.Teams.Deleting).To(Equal(1))
+			Expect(report.Teams.Percent).To(Equal(100.0))
+			Expect(report.Teams.Incoming).To(Equal(2), "the snapshot names 2 teams, neither of which exists yet")
+
+			// Memberships are a cascade of those deletions, reported but never
+			// a reason to hold.
+			Expect(report.Memberships).NotTo(BeNil())
+			Expect(report.Memberships.Kind).To(Equal("cascaded"))
+			Expect(report.Memberships.Existing).To(Equal(1))
+			Expect(report.Memberships.Deleting).To(Equal(1))
+			Expect(report.Memberships.ContributesToHold).To(BeFalse())
+		})
+
+		It("should write nothing at all while held", func() {
+			seedBulkUsers(5)
+
+			Expect(doSync(adminToken).Code).To(Equal(http.StatusConflict))
+
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(Equal(5), "nothing may be deleted once the guard trips")
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-user-%'`)).To(Equal(0), "and nothing may be created either -- the whole sync is one transaction")
+			Expect(countRows(`SELECT COUNT(*) FROM teams WHERE id LIKE 'sync-team-%'`)).To(Equal(0))
+		})
+
+		It("should never disclose the provider token in a hold response", func() {
+			seedBulkUsers(5)
+			w := doSync(adminToken)
+			Expect(w.Code).To(Equal(http.StatusConflict))
+			Expect(w.Body.String()).NotTo(ContainSubstring(providerAPIToken))
+		})
+
+		It("should apply the sync when an admin explicitly overrides the hold", func() {
+			seedBulkUsers(5)
+
+			Expect(doSync(adminToken).Code).To(Equal(http.StatusConflict), "the plain sync must still hold")
+
+			w := doOverrideSync(adminToken)
+			Expect(w.Code).To(Equal(http.StatusOK), w.Body.String())
+
+			var result services.SyncResult
+			Expect(json.Unmarshal(w.Body.Bytes(), &result)).To(Succeed())
+			Expect(result.MassDeletionOverridden).To(BeTrue())
+			Expect(result.MassDeletion).NotTo(BeNil(), "an overridden run reports what it waived")
+			Expect(result.MassDeletion.Users.Deleting).To(Equal(5))
+			Expect(result.UsersDeleted).To(Equal(5))
+
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(BeZero())
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-user-%'`)).To(Equal(2), "the snapshot's users are imported by the overridden run")
+		})
+
+		It("should scope the override to the one request carrying it", func() {
+			seedBulkUsers(5)
+			Expect(doOverrideSync(adminToken).Code).To(Equal(http.StatusOK))
+
+			// Re-seed the same over-threshold condition and sync normally: the
+			// previous override must not have relaxed anything for this run.
+			seedBulkUsers(5)
+			Expect(doSync(adminToken).Code).To(Equal(http.StatusConflict))
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(Equal(5))
+		})
+
+		It("should not override when the flag is false", func() {
+			seedBulkUsers(5)
+
+			w := doSyncWithBody(adminToken, `{"overrideMassDeletion": false}`)
+			Expect(w.Code).To(Equal(http.StatusConflict), w.Body.String())
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(Equal(5))
+		})
+
+		It("should reject a non-admin asking for an override, and write nothing", func() {
+			seedBulkUsers(5)
+
+			w := doOverrideSync(memberToken)
+			Expect(w.Code).To(Equal(http.StatusForbidden), w.Body.String())
+
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(Equal(5))
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-user-%'`)).To(BeZero())
+		})
+
+		It("should reject an unauthenticated override", func() {
+			seedBulkUsers(5)
+
+			req, err := http.NewRequest(http.MethodPost, "/api/v1/admin/organization-provider/sync", strings.NewReader(`{"overrideMassDeletion": true}`))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			Expect(w.Code).To(Equal(http.StatusUnauthorized))
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(Equal(5))
+		})
+
+		It("should still protect admin, demo and E2E fixtures when overriding", func() {
+			seedBulkUsers(5)
+			_, err := db.Exec(`
+				INSERT INTO users (id, username, email, full_name, hierarchy_level_id, password_hash) VALUES
+				('demo', 'demo', 'demo@teams360.demo', 'Demo User', 'level-5', ''),
+				('vp', 'vp', 'vp@teams360.demo', 'VP', 'level-1', ''),
+				('e2e_demo', 'e2e_demo', 'e2e_demo@teams360.demo', 'E2E Demo', 'level-5', '')
+			`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = db.Exec(`INSERT INTO teams (id, name) VALUES ('team-phoenix', 'Phoenix Squad'), ('e2e_team1', 'E2E Team')`)
+			Expect(err).NotTo(HaveOccurred())
+
+			w := doOverrideSync(adminToken)
+			Expect(w.Code).To(Equal(http.StatusOK), w.Body.String())
+
+			for _, id := range []string{"admin", "demo", "vp", "e2e_demo"} {
+				Expect(countRows(`SELECT COUNT(*) FROM users WHERE id = $1`, id)).To(Equal(1), id+" must survive an overridden sync")
+			}
+			for _, id := range []string{"team-phoenix", "e2e_team1"} {
+				Expect(countRows(`SELECT COUNT(*) FROM teams WHERE id = $1`, id)).To(Equal(1), id+" must survive an overridden sync")
+			}
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(BeZero(), "the override still deletes the non-protected records")
+		})
+
+		It("should still preserve health-check history when overriding", func() {
+			seedBulkUsers(1)
+			_, err := db.Exec(`
+				INSERT INTO health_check_sessions (id, user_id, team_id, assessment_period, completed_at)
+				VALUES ('sync-override-session', 'sync-bulk-a', 'sync-doomed-team', '2026 - 1st Half', CURRENT_TIMESTAMP)
+			`)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(doOverrideSync(adminToken).Code).To(Equal(http.StatusOK))
+
+			Expect(countRows(`SELECT COUNT(*) FROM health_check_sessions WHERE id = 'sync-override-session'`)).To(Equal(1),
+				"history must survive an overridden sync exactly as it survives a normal one")
+		})
+
+		It("should still validate the snapshot when an override is requested", func() {
+			seedBulkUsers(5)
+			providerBody = `{
+				"contractVersion": "2.0",
+				"generatedAt": "2026-08-31T05:04:48.240Z",
+				"teams": [{"id": "sync-team-1", "name": "Alcatraz"}],
+				"users": [{"id": "sync-user-1", "username": "syncalice", "displayName": "Alice", "email": "syncalice@test.com", "hierarchyLevelId": "level-3"}],
+				"memberships": []
+			}`
+
+			w := doOverrideSync(adminToken)
+			Expect(w.Code).To(Equal(http.StatusBadGateway), "an override waives the deletion guard, never validation")
+			Expect(w.Body.String()).To(ContainSubstring("contract version"))
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(Equal(5))
+		})
+
+		It("should still fail an override when the provider itself fails", func() {
+			seedBulkUsers(5)
+			providerStatus = http.StatusInternalServerError
+			providerBody = `{"error":"upstream exploded"}`
+
+			w := doOverrideSync(adminToken)
+			Expect(w.Code).To(Equal(http.StatusBadGateway))
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(Equal(5))
+		})
+
+		It("should reject a malformed body rather than silently syncing", func() {
+			seedBulkUsers(5)
+
+			w := doSyncWithBody(adminToken, `{"overrideMassDeletion": "yes"}`)
+			Expect(w.Code).To(Equal(http.StatusBadRequest), w.Body.String())
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(Equal(5))
+		})
+
+		It("should leave a safe sync untouched by any of this", func() {
+			os.Setenv(services.EnvMaxDeletePercent, "100")
+
+			w := doSync(adminToken)
+			Expect(w.Code).To(Equal(http.StatusOK), w.Body.String())
+
+			var result services.SyncResult
+			Expect(json.Unmarshal(w.Body.Bytes(), &result)).To(Succeed())
+			Expect(result.MassDeletionOverridden).To(BeFalse(), "a sync under the threshold is not an override")
+			Expect(result.MassDeletion).To(BeNil())
+			Expect(result.UsersSynced).To(Equal(2))
 		})
 	})
 

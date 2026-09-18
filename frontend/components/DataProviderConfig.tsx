@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { AlertCircle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
 import {
   getOrganizationProviderSettings,
   syncOrganizationProvider,
+  getMassDeletionHold,
   clearAdminCache,
+  DeletionMetric,
+  MassDeletionReport,
   OrganizationProviderSettings,
   OrganizationSyncResult,
 } from "@/lib/api/admin";
@@ -20,6 +23,31 @@ import { readSyncState, writeSyncState, clearSyncState, isStale, SYNC_STALE_TIME
  * teams, and memberships, so it is deliberately manual: an admin decides when
  * the organization changes shape.
  */
+/** Renders a percentage the way the backend calculated it, e.g. "25.0%". */
+function formatPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
+/**
+ * Renders one metric as "deleted / existing = percent%", using the backend's
+ * own label for what the count means. A cascaded count is never called a
+ * deletion: those rows go because the database removes them with their owner.
+ */
+function metricSentence(metric: DeletionMetric): string {
+  const label = metric.kind === "cascaded" ? "cascaded" : "deleted";
+  return `${metric.deleting} ${label} / ${metric.existing} existing = ${formatPercent(metric.percent)}`;
+}
+
+/**
+ * Explains WHY a count is what it is: how many records the provider actually
+ * sent for this entity type. A big deletion next to a small incoming count is
+ * an incomplete payload, not a real mass departure -- which is the single most
+ * common cause of a surprising hold, and is otherwise invisible from the UI.
+ */
+function incomingSentence(metric: DeletionMetric): string {
+  return `provider sent ${metric.incoming}`;
+}
+
 export default function DataProviderConfig() {
   const [settings, setSettings] = useState<OrganizationProviderSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,6 +63,15 @@ export default function DataProviderConfig() {
     return !!persisted && persisted.status === "in_progress" && !isStale(persisted);
   });
   const [syncResult, setSyncResult] = useState<OrganizationSyncResult | null>(null);
+  // The counts behind a backend hold. Present only while a hold is unresolved:
+  // it is what the admin reviews before deciding whether to override, and it is
+  // cleared the moment another sync starts so a stale hold can never authorize
+  // a later run.
+  const [hold, setHold] = useState<MassDeletionReport | null>(null);
+  // Two-step confirmation for the override, matching the destructive-action
+  // pattern used elsewhere in admin: clicking Sync Anyway reveals a confirm
+  // button rather than firing the request.
+  const [confirmingOverride, setConfirmingOverride] = useState(false);
   const staleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Shared by the original click and by a remount that reattached to the
@@ -51,6 +88,13 @@ export default function DataProviderConfig() {
       // the screen would keep showing pre-sync counts.
       clearAdminCache();
     } else {
+      // A hold is not a failure to retry blindly -- it is a decision the admin
+      // has to make, so it gets its own state and its own banner.
+      const heldReport = getMassDeletionHold(outcome.error);
+      if (heldReport) {
+        setHold(heldReport);
+        setConfirmingOverride(false);
+      }
       setError(outcome.error?.message || "Synchronization failed");
     }
   };
@@ -116,7 +160,12 @@ export default function DataProviderConfig() {
     }
   };
 
-  const handleSync = async () => {
+  /**
+   * Runs a sync. `overrideMassDeletion` is only ever true on the explicit,
+   * confirmed Sync Anyway path -- a hold is never retried automatically, and
+   * the plain Sync Now button always sends a normal request.
+   */
+  const handleSync = async (overrideMassDeletion = false) => {
     // Guard as well as disable: a double-submit must not reach the backend,
     // which would answer the second call with a 409.
     if (syncing) return;
@@ -127,8 +176,10 @@ export default function DataProviderConfig() {
     setSyncing(true);
     setError(null);
     setSyncResult(null);
+    setHold(null);
+    setConfirmingOverride(false);
 
-    const promise = syncOrganizationProvider();
+    const promise = syncOrganizationProvider({ overrideMassDeletion });
     setActiveSyncPromise(promise);
     try {
       const result = await promise;
@@ -148,7 +199,6 @@ export default function DataProviderConfig() {
   }
 
   const readyToSync = settings?.readyToSync ?? false;
-  const isMassDeletionHold = !!error?.toLowerCase().includes("held for review");
   // Only render the "not configured" guidance once settings actually loaded
   // and said so -- a failed fetch (settingsLoadError) means readiness is
   // simply unknown, not that the provider is unconfigured.
@@ -160,7 +210,7 @@ export default function DataProviderConfig() {
         <h3 className="text-lg font-medium text-gray-900">Organization Data Provider</h3>
         <button
           data-testid="sync-now-btn"
-          onClick={handleSync}
+          onClick={() => handleSync()}
           disabled={syncing || !readyToSync || !!settingsLoadError}
           aria-label="Sync organization data from provider"
           aria-busy={syncing}
@@ -225,14 +275,77 @@ export default function DataProviderConfig() {
         </div>
       )}
 
-      {error && (
+      {hold && (
         <div
-          data-testid={isMassDeletionHold ? "sync-mass-deletion-hold" : "provider-error"}
+          data-testid="sync-mass-deletion-hold"
+          role="alert"
+          className="mb-4 p-4 bg-red-50 border-2 border-red-400 rounded-lg flex items-start gap-3"
+        >
+          <ShieldAlert className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+          <div className="w-full">
+            <p className="font-medium text-red-900">Sync held for review</p>
+            <ul className="text-sm text-red-800 mt-2 space-y-1">
+              <li data-testid="sync-hold-users">
+                <strong>Users:</strong> {metricSentence(hold.users)}{" "}
+                <span className="text-red-600">({incomingSentence(hold.users)})</span>
+              </li>
+              <li data-testid="sync-hold-teams">
+                <strong>Teams:</strong> {metricSentence(hold.teams)}{" "}
+                <span className="text-red-600">({incomingSentence(hold.teams)})</span>
+              </li>
+            </ul>
+            <p className="text-xs text-red-700 mt-2" data-testid="sync-hold-threshold">
+              "Existing" counts only the users/teams the provider is allowed to manage &mdash; it
+              excludes the permanent admin and the fixed demo/E2E accounts and teams, which can
+              never be deleted by a sync. Configured threshold: {formatPercent(hold.threshold)}.
+            </p>
+
+            {!confirmingOverride ? (
+              <button
+                data-testid="sync-anyway-btn"
+                onClick={() => setConfirmingOverride(true)}
+                disabled={syncing}
+                className="mt-3 px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Sync Anyway
+              </button>
+            ) : (
+              <div data-testid="sync-anyway-confirm" className="mt-3">
+                <p className="text-sm font-medium text-red-900">
+                  Apply this sync and permanently delete {hold.users.deleting} user(s) and{" "}
+                  {hold.teams.deleting} team(s)? This cannot be undone.
+                </p>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    data-testid="sync-anyway-confirm-btn"
+                    onClick={() => handleSync(true)}
+                    disabled={syncing}
+                    className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Yes, sync anyway
+                  </button>
+                  <button
+                    data-testid="sync-anyway-cancel-btn"
+                    onClick={() => setConfirmingOverride(false)}
+                    className="px-3 py-1.5 text-sm text-red-800 underline"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {error && !hold && (
+        <div
+          data-testid="provider-error"
           className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3"
         >
           <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
           <div>
-            <p className="font-medium text-red-900">{isMassDeletionHold ? "Sync held for review" : "Error"}</p>
+            <p className="font-medium text-red-900">Error</p>
             <p className="text-sm text-red-700">{error}</p>
           </div>
         </div>
@@ -246,6 +359,11 @@ export default function DataProviderConfig() {
           <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
           <div>
             <p className="font-medium text-green-900">Sync complete</p>
+            {syncResult.massDeletionOverridden && (
+              <p className="text-sm text-amber-700" data-testid="sync-override-applied">
+                Applied with an administrator override of the mass-deletion hold.
+              </p>
+            )}
             <p className="text-sm text-green-700">
               {syncResult.usersSynced} users, {syncResult.teamsSynced} teams and{" "}
               {syncResult.membershipsSynced} team memberships synchronized.

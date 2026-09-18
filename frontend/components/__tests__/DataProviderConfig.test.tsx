@@ -8,11 +8,18 @@ const getSettings = vi.fn();
 const sync = vi.fn();
 const clearCache = vi.fn();
 
-vi.mock('@/lib/api/admin', () => ({
-  getOrganizationProviderSettings: (...a: any[]) => getSettings(...a),
-  syncOrganizationProvider: (...a: any[]) => sync(...a),
-  clearAdminCache: (...a: any[]) => clearCache(...a),
-}));
+// getMassDeletionHold is deliberately NOT mocked: the component's decision to
+// show the hold banner depends on how that helper reads a real error body, so
+// the spec exercises the real one.
+vi.mock('@/lib/api/admin', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api/admin')>();
+  return {
+    ...actual,
+    getOrganizationProviderSettings: (...a: any[]) => getSettings(...a),
+    syncOrganizationProvider: (...a: any[]) => sync(...a),
+    clearAdminCache: (...a: any[]) => clearCache(...a),
+  };
+});
 
 import DataProviderConfig from '../DataProviderConfig';
 import {
@@ -48,6 +55,30 @@ const SYNC_RESULT = {
   startedAt: '2026-08-31T05:00:00Z',
   completedAt: '2026-08-31T05:00:04Z',
 };
+
+// The backend's held-sync body, shaped exactly as the API returns it: a
+// standard error envelope plus the aggregate counts. 6 of 20 users (30%) and
+// 3 of 10 teams (30%) over a 20% threshold, with an informational membership
+// cascade that is NOT a reason for the hold.
+const HOLD_REPORT = {
+  threshold: 20,
+  users: { kind: 'deleted', existing: 20, deleting: 6, percent: 30, threshold: 20, incoming: 14, exceedsThreshold: true, contributesToHold: true },
+  teams: { kind: 'deleted', existing: 10, deleting: 3, percent: 30, threshold: 20, incoming: 7, exceedsThreshold: true, contributesToHold: true },
+  memberships: { kind: 'cascaded', existing: 50, deleting: 8, percent: 16, threshold: 20, incoming: 42, exceedsThreshold: false, contributesToHold: false },
+};
+
+const holdError = (report: any = HOLD_REPORT) =>
+  Object.assign(new Error('Synchronization held for review'), {
+    name: 'APIRequestError',
+    statusCode: 409,
+    apiError: {
+      error: 'Synchronization held for review',
+      message: 'This sync would remove an unusually large share of users or teams.',
+      code: 'mass_deletion_hold',
+      applied: false,
+      massDeletion: report,
+    },
+  });
 
 // renderReady mounts the component and waits for the initial settings load,
 // so specs start from a settled screen rather than the loading state.
@@ -207,7 +238,7 @@ describe('DataProviderConfig — Sync Now button', () => {
 
   it('shows a distinct mass-deletion-hold message and leaves the button usable', async () => {
     const user = userEvent.setup();
-    sync.mockRejectedValue(new Error('Sync held for review: this sync would remove an unusually large share of users or teams.'));
+    sync.mockRejectedValue(holdError());
     await renderReady();
 
     await user.click(screen.getByTestId('sync-now-btn'));
@@ -366,5 +397,167 @@ describe('DataProviderConfig — persisted sync state (reload, tab switch, navig
     await renderReady();
     expect(screen.getByTestId('sync-now-btn')).toBeEnabled();
     expect(readSyncState()).toBeNull();
+  });
+});
+
+describe('DataProviderConfig — mass-deletion hold and Sync Anyway override', () => {
+  it('shows the calculated users, teams, memberships and threshold in a red warning', async () => {
+    const user = userEvent.setup();
+    sync.mockRejectedValue(holdError());
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+
+    const banner = await screen.findByTestId('sync-mass-deletion-hold');
+    expect(banner).toHaveAttribute('role', 'alert');
+    expect(banner.className).toMatch(/border-red/);
+
+    expect(screen.getByTestId('sync-hold-users')).toHaveTextContent('6 deleted / 20 existing = 30.0%');
+    expect(screen.getByTestId('sync-hold-teams')).toHaveTextContent('3 deleted / 10 existing = 30.0%');
+    // Labelled by what the backend says it is: a cascade, not a deletion.
+    expect(screen.getByTestId('sync-hold-memberships')).toHaveTextContent('8 cascaded / 50 existing = 16.0%');
+    expect(screen.getByTestId('sync-hold-threshold')).toHaveTextContent('20.0%');
+    // The diagnostic that explains a surprising count: what the provider sent.
+    expect(screen.getByTestId('sync-hold-users')).toHaveTextContent('provider sent 14');
+    expect(screen.getByTestId('sync-hold-teams')).toHaveTextContent('provider sent 7');
+    expect(screen.getByTestId('sync-hold-incoming-hint')).toHaveTextContent("provider's snapshot is missing those records");
+    expect(screen.getByTestId('sync-hold-not-applied')).toHaveTextContent('has not been applied');
+    expect(screen.queryByTestId('sync-result')).not.toBeInTheDocument();
+  });
+
+  it('omits the membership line when the backend did not measure one', async () => {
+    const user = userEvent.setup();
+    const { memberships, ...withoutMemberships } = HOLD_REPORT;
+    sync.mockRejectedValue(holdError(withoutMemberships));
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+
+    await screen.findByTestId('sync-hold-users');
+    expect(screen.queryByTestId('sync-hold-memberships')).not.toBeInTheDocument();
+  });
+
+  it('never sends an override on its own', async () => {
+    const user = userEvent.setup();
+    sync.mockRejectedValue(holdError());
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+    await screen.findByTestId('sync-mass-deletion-hold');
+
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(sync).toHaveBeenCalledWith({ overrideMassDeletion: false });
+    // Sync Anyway is offered, but nothing is retried until it is used.
+    expect(screen.getByTestId('sync-anyway-btn')).toBeInTheDocument();
+    expect(screen.queryByTestId('sync-anyway-confirm-btn')).not.toBeInTheDocument();
+  });
+
+  it('asks for confirmation before sending the override', async () => {
+    const user = userEvent.setup();
+    sync.mockRejectedValue(holdError());
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+    await user.click(await screen.findByTestId('sync-anyway-btn'));
+
+    const confirm = screen.getByTestId('sync-anyway-confirm');
+    expect(confirm).toHaveTextContent('6 user(s)');
+    expect(confirm).toHaveTextContent('3 team(s)');
+    // Still only the original request: revealing the confirmation sends nothing.
+    expect(sync).toHaveBeenCalledTimes(1);
+  });
+
+  it('abandons the override when the admin cancels', async () => {
+    const user = userEvent.setup();
+    sync.mockRejectedValue(holdError());
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+    await user.click(await screen.findByTestId('sync-anyway-btn'));
+    await user.click(screen.getByTestId('sync-anyway-cancel-btn'));
+
+    expect(screen.queryByTestId('sync-anyway-confirm')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sync-mass-deletion-hold')).toBeInTheDocument();
+    expect(sync).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the one-time override and shows the result once confirmed', async () => {
+    const user = userEvent.setup();
+    sync.mockRejectedValueOnce(holdError());
+    sync.mockResolvedValueOnce({
+      ...SYNC_RESULT,
+      usersDeleted: 6,
+      teamsDeleted: 3,
+      massDeletionOverridden: true,
+      massDeletion: HOLD_REPORT,
+    });
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+    await user.click(await screen.findByTestId('sync-anyway-btn'));
+    await user.click(screen.getByTestId('sync-anyway-confirm-btn'));
+
+    const result = await screen.findByTestId('sync-result');
+    expect(result).toHaveTextContent('Sync complete');
+    expect(screen.getByTestId('sync-override-applied')).toBeInTheDocument();
+    expect(screen.getByTestId('sync-deleted')).toHaveTextContent('6 user(s) and 3 team(s) removed');
+
+    expect(sync).toHaveBeenNthCalledWith(2, { overrideMassDeletion: true });
+    // The hold is resolved, so the warning and its buttons are gone.
+    expect(screen.queryByTestId('sync-mass-deletion-hold')).not.toBeInTheDocument();
+    expect(clearCache).toHaveBeenCalled();
+  });
+
+  it('shows the error when the overridden sync itself fails validation', async () => {
+    const user = userEvent.setup();
+    sync.mockRejectedValueOnce(holdError());
+    sync.mockRejectedValueOnce(new Error('Provider returned data that failed contract validation'));
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+    await user.click(await screen.findByTestId('sync-anyway-btn'));
+    await user.click(screen.getByTestId('sync-anyway-confirm-btn'));
+
+    const err = await screen.findByTestId('provider-error');
+    expect(err).toHaveTextContent('failed contract validation');
+    expect(screen.queryByTestId('sync-mass-deletion-hold')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sync-result')).not.toBeInTheDocument();
+  });
+
+  it('leaves a safe sync completely unchanged', async () => {
+    const user = userEvent.setup();
+    sync.mockResolvedValue(SYNC_RESULT);
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+
+    await screen.findByTestId('sync-result');
+    expect(sync).toHaveBeenCalledWith({ overrideMassDeletion: false });
+    expect(screen.queryByTestId('sync-mass-deletion-hold')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sync-override-applied')).not.toBeInTheDocument();
+  });
+
+
+  it('makes an under-reported provider payload visible as the cause of the hold', async () => {
+    const user = userEvent.setup();
+    // The real-world shape: every user came back, almost no teams did. Users
+    // read as healthy while teams look catastrophic -- which is a payload
+    // problem, not a mass departure, and the banner has to say so.
+    sync.mockRejectedValue(
+      holdError({
+        threshold: 20,
+        users: { kind: 'deleted', existing: 240, deleting: 0, percent: 0, threshold: 20, incoming: 240, exceedsThreshold: false, contributesToHold: true },
+        teams: { kind: 'deleted', existing: 243, deleting: 237, percent: 97.5, threshold: 20, incoming: 6, exceedsThreshold: true, contributesToHold: true },
+      })
+    );
+    await renderReady();
+
+    await user.click(screen.getByTestId('sync-now-btn'));
+
+    await screen.findByTestId('sync-mass-deletion-hold');
+    expect(screen.getByTestId('sync-hold-users')).toHaveTextContent('0 deleted / 240 existing = 0.0%');
+    expect(screen.getByTestId('sync-hold-users')).toHaveTextContent('provider sent 240');
+    expect(screen.getByTestId('sync-hold-teams')).toHaveTextContent('237 deleted / 243 existing = 97.5%');
+    expect(screen.getByTestId('sync-hold-teams')).toHaveTextContent('provider sent 6');
   });
 });

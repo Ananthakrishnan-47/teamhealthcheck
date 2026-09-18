@@ -111,6 +111,13 @@ type ApplyInput struct {
 	// MaxDeletePercent bounds how much of the current non-protected user/team
 	// population a single sync may remove. See EvaluateMassDeletionGuard.
 	MaxDeletePercent float64
+
+	// OverrideMassDeletion waives the mass-deletion percentage guard for this
+	// one apply, after an administrator reviewed the held sync's counts and
+	// explicitly asked for it. It waives nothing else: snapshot validation,
+	// the protected-record allowlists, and the single-transaction guarantee
+	// all still apply, and MaxDeletePercent itself is left untouched.
+	OverrideMassDeletion bool
 }
 
 // ApplyResult reports what a sync changed.
@@ -145,11 +152,136 @@ type ApplyResult struct {
 	// is reported so an admin can see what a sync actually removed, not a gate
 	// that blocks the user/team deletion itself.
 	ActionItemsDeleted int `json:"actionItemsDeleted"`
+
+	// MassDeletionOverride is set only when the guard tripped and an
+	// administrator's explicit override let the sync proceed anyway. It carries
+	// the counts that were waived, so the service can audit-log them.
+	MassDeletionOverride *MassDeletionReport `json:"massDeletionOverride,omitempty"`
 }
 
 // ErrMassDeletionBlocked is returned when a sync's calculated deletions exceed
 // the configured safety threshold. Nothing is written when this is returned.
 var ErrMassDeletionBlocked = errors.New("sync blocked: deletions exceed the configured safety threshold, review required")
+
+// Kinds a DeletionMetric can report. The distinction matters to an admin
+// reviewing a held sync: a "deleted" count is a row this sync would remove
+// directly and is what the guard measures; a "cascaded" count is a row the
+// database removes as a consequence of those deletions (a foreign key with
+// ON DELETE CASCADE) and is reported for visibility only.
+const (
+	DeletionKindDeleted  = "deleted"
+	DeletionKindCascaded = "cascaded"
+)
+
+// DeletionMetric is one entity type's share of this sync's deletions, using
+// exactly the numbers the guard itself works from: Deleting/Existing*100
+// compared against Threshold. Existing is always the count of eligible
+// (non-protected) rows currently in THC, never the whole table.
+type DeletionMetric struct {
+	// Kind is DeletionKindDeleted or DeletionKindCascaded -- see the constants.
+	Kind string `json:"kind"`
+	// Existing is the denominator: eligible rows currently in THC.
+	Existing int `json:"existing"`
+	// Incoming is how many records of this type the provider's snapshot
+	// actually contained. It is not part of the guard's arithmetic, but it is
+	// the single most useful number for diagnosing a surprising hold: a large
+	// Deleting alongside a small Incoming means the provider under-reported
+	// this entity type, not that the organization really shrank. Zero when the
+	// count was not supplied.
+	Incoming int `json:"incoming"`
+	// Deleting is the numerator: rows this sync proposes to remove.
+	Deleting int `json:"deleting"`
+	// Percent is Deleting/Existing*100, or 100 when Existing is 0 and
+	// Deleting is not (the same "treat as unsafe" rule exceedsThreshold uses).
+	Percent float64 `json:"percent"`
+	// Threshold is the configured maximum percentage, for display alongside Percent.
+	Threshold float64 `json:"threshold"`
+	// ExceedsThreshold is the raw comparison result for this metric.
+	ExceedsThreshold bool `json:"exceedsThreshold"`
+	// ContributesToHold is false for metrics reported for information only.
+	// Only user and team deletions can hold a sync; membership cascade is
+	// displayed but never blocks, which is exactly the pre-existing guard
+	// semantics and is stated here rather than left to be inferred.
+	ContributesToHold bool `json:"contributesToHold"`
+}
+
+// MassDeletionReport is the full picture of what a sync proposes to remove,
+// built from the same counts EvaluateMassDeletionGuard compares. It carries no
+// record identities, provider payload, or credentials -- only counts.
+type MassDeletionReport struct {
+	Threshold float64        `json:"threshold"`
+	Users     DeletionMetric `json:"users"`
+	Teams     DeletionMetric `json:"teams"`
+	// Memberships is the informational cascade metric, attached by the
+	// persistence layer when it can be measured. It is nil when unavailable.
+	Memberships *DeletionMetric `json:"memberships,omitempty"`
+}
+
+// WithIncoming records how many users, teams and memberships the provider's
+// snapshot actually contained. This is reporting only -- it never changes a
+// percentage, a verdict, or which metrics contribute to the hold.
+func (r *MassDeletionReport) WithIncoming(users, teams, memberships int) {
+	r.Users.Incoming = users
+	r.Teams.Incoming = teams
+	if r.Memberships != nil {
+		r.Memberships.Incoming = memberships
+	}
+}
+
+// Held reports whether any hold-contributing metric is over the threshold.
+func (r MassDeletionReport) Held() bool {
+	return (r.Users.ContributesToHold && r.Users.ExceedsThreshold) ||
+		(r.Teams.ContributesToHold && r.Teams.ExceedsThreshold)
+}
+
+// MassDeletionHoldError is the typed error a tripped guard returns. It wraps
+// ErrMassDeletionBlocked, so every existing errors.Is check keeps working,
+// and carries the counts so the API can show an admin what would have been
+// deleted instead of only saying that something would have been.
+type MassDeletionHoldError struct {
+	Report MassDeletionReport
+}
+
+func (e *MassDeletionHoldError) Error() string {
+	// Same wording the guard used before this type existed, so log lines and
+	// message assertions read identically.
+	switch {
+	case e.Report.Users.ExceedsThreshold:
+		return fmt.Sprintf("%v: would delete %d of %d users", ErrMassDeletionBlocked, e.Report.Users.Deleting, e.Report.Users.Existing)
+	case e.Report.Teams.ExceedsThreshold:
+		return fmt.Sprintf("%v: would delete %d of %d teams", ErrMassDeletionBlocked, e.Report.Teams.Deleting, e.Report.Teams.Existing)
+	default:
+		return ErrMassDeletionBlocked.Error()
+	}
+}
+
+// Unwrap keeps errors.Is(err, ErrMassDeletionBlocked) true.
+func (e *MassDeletionHoldError) Unwrap() error { return ErrMassDeletionBlocked }
+
+// BuildMassDeletionReport computes every metric the guard decides on, without
+// deciding anything itself. EvaluateMassDeletionGuard is the only caller that
+// turns it into an error; the override path uses it to log what was waived.
+func BuildMassDeletionReport(currentUsers, deleteUsers, currentTeams, deleteTeams int, maxPercent float64) MassDeletionReport {
+	return MassDeletionReport{
+		Threshold: maxPercent,
+		Users:     NewDeletionMetric(DeletionKindDeleted, currentUsers, deleteUsers, maxPercent, true),
+		Teams:     NewDeletionMetric(DeletionKindDeleted, currentTeams, deleteTeams, maxPercent, true),
+	}
+}
+
+// NewDeletionMetric builds one metric from the same percentage math the guard
+// applies, so a displayed percentage can never disagree with the decision.
+func NewDeletionMetric(kind string, current, deletions int, maxPercent float64, contributesToHold bool) DeletionMetric {
+	return DeletionMetric{
+		Kind:              kind,
+		Existing:          current,
+		Deleting:          deletions,
+		Percent:           deletionPercent(current, deletions),
+		Threshold:         maxPercent,
+		ExceedsThreshold:  exceedsThreshold(current, deletions, maxPercent),
+		ContributesToHold: contributesToHold,
+	}
+}
 
 // EvaluateMassDeletionGuard aborts a sync whose calculated hard deletions would
 // remove more than maxPercent of the currently-synced (non-protected) users or
@@ -161,14 +293,28 @@ var ErrMassDeletionBlocked = errors.New("sync blocked: deletions exceed the conf
 // case here: those users are simply counted like any other deletion once they
 // stop appearing in the snapshot. The exclusion is a validation concern (their
 // absence must not be treated as an incomplete response), not a guard concern.
+//
+// On a trip it returns a *MassDeletionHoldError carrying the counts. The
+// numbers are the guard's own, not a second calculation.
 func EvaluateMassDeletionGuard(currentUsers, deleteUsers, currentTeams, deleteTeams int, maxPercent float64) error {
-	if exceedsThreshold(currentUsers, deleteUsers, maxPercent) {
-		return fmt.Errorf("%w: would delete %d of %d users", ErrMassDeletionBlocked, deleteUsers, currentUsers)
-	}
-	if exceedsThreshold(currentTeams, deleteTeams, maxPercent) {
-		return fmt.Errorf("%w: would delete %d of %d teams", ErrMassDeletionBlocked, deleteTeams, currentTeams)
+	report := BuildMassDeletionReport(currentUsers, deleteUsers, currentTeams, deleteTeams, maxPercent)
+	if report.Held() {
+		return &MassDeletionHoldError{Report: report}
 	}
 	return nil
+}
+
+// deletionPercent is the single percentage formula: deletions as a share of
+// the eligible existing population. A deletion from an empty population is
+// reported as 100% to match exceedsThreshold treating it as unsafe.
+func deletionPercent(current, deletions int) float64 {
+	if deletions == 0 {
+		return 0
+	}
+	if current == 0 {
+		return 100
+	}
+	return float64(deletions) / float64(current) * 100
 }
 
 func exceedsThreshold(current, deletions int, maxPercent float64) bool {
@@ -181,7 +327,7 @@ func exceedsThreshold(current, deletions int, maxPercent float64) bool {
 		// rather than dividing by zero.
 		return true
 	}
-	return float64(deletions)/float64(current)*100 > maxPercent
+	return deletionPercent(current, deletions) > maxPercent
 }
 
 // Repository is the persistence contract for the provider integration. There
@@ -195,7 +341,8 @@ type Repository interface {
 	// and teams (IsProtectedUser/IsProtectedTeam) are never created, updated, or
 	// deleted. Every other user/team present in the snapshot is upserted; every
 	// other user/team absent from the snapshot is a hard-delete candidate,
-	// subject to EvaluateMassDeletionGuard and the action-items retention check
-	// documented on ApplyResult. On any error, nothing is committed.
+	// subject to EvaluateMassDeletionGuard (unless ApplyInput.OverrideMassDeletion
+	// waives that one check) and the action-items retention check documented on
+	// ApplyResult. On any error, nothing is committed.
 	ApplySnapshot(ctx context.Context, in ApplyInput) (*ApplyResult, error)
 }

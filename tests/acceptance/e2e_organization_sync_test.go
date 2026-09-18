@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mxschmitt/playwright-go"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/mxschmitt/playwright-go"
 )
 
 // Organization Snapshot Contract v1.0 fixes the endpoint, the credential
@@ -224,6 +224,22 @@ var _ = Describe("E2E: Organization Provider Sync", Serial, Ordered, Label("e2e"
 		Expect(err).NotTo(HaveOccurred())
 		Expect(text).To(ContainSubstring("2 users"))
 		Expect(text).To(ContainSubstring("2 team memberships"))
+
+		// A safe sync must be exactly as it always was: no hold warning, no
+		// Sync Anyway affordance, and no override reported on the result. The
+		// held path itself cannot be provoked here -- this suite starts the
+		// backend with ORG_SYNC_MAX_DELETE_PERCENT=100 (see suite_test.go) and
+		// the threshold is process-level configuration, so a held sync would
+		// need a second backend. That path is covered in the backend
+		// integration suite; what this spec pins down is that adding the
+		// override left the ordinary sync untouched.
+		By("Verifying a safe sync shows no mass-deletion hold and no override")
+		holdVisible, _ := page.Locator("[data-testid='sync-mass-deletion-hold']").IsVisible()
+		Expect(holdVisible).To(BeFalse(), "a sync under the threshold must not be held")
+		anywayVisible, _ := page.Locator("[data-testid='sync-anyway-btn']").IsVisible()
+		Expect(anywayVisible).To(BeFalse(), "Sync Anyway is only offered for a held sync")
+		overrideVisible, _ := page.Locator("[data-testid='sync-override-applied']").IsVisible()
+		Expect(overrideVisible).To(BeFalse(), "a normal sync is not an override")
 
 		By("Verifying the users landed in the database")
 		Expect(countRowsForSync(

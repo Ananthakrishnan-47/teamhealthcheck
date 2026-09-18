@@ -835,6 +835,10 @@ export interface OrganizationSyncResult {
   managerLinksCleared: number;
   teamLeadsCleared: number;
   membershipsDiscarded: number;
+  /** True when this run only completed because an admin waived the mass-deletion hold. */
+  massDeletionOverridden?: boolean;
+  /** The counts that were waived, present only alongside massDeletionOverridden. */
+  massDeletion?: MassDeletionReport;
   startedAt: string;
   completedAt: string;
 }
@@ -853,15 +857,80 @@ export async function getOrganizationProviderSettings(): Promise<OrganizationPro
   );
 }
 
+/** How a deletion metric's rows are removed. */
+export type DeletionMetricKind = 'deleted' | 'cascaded';
+
+/** One entity type's share of the deletions a sync proposes. */
+export interface DeletionMetric {
+  /** 'deleted' for rows the sync removes directly, 'cascaded' for rows the database removes with them. */
+  kind: DeletionMetricKind;
+  /** Denominator: eligible (non-protected) rows currently in Team360. */
+  existing: number;
+  /**
+   * How many records of this type the provider's snapshot actually contained.
+   * Not part of the threshold math -- it is the number that tells an admin
+   * whether a surprising hold is a real mass departure or just an incomplete
+   * provider payload.
+   */
+  incoming: number;
+  /** Numerator: rows this sync proposes to remove. */
+  deleting: number;
+  /** deleting / existing * 100, as the backend guard computes it. */
+  percent: number;
+  /** The configured maximum percentage (default 20). */
+  threshold: number;
+  exceedsThreshold: boolean;
+  /** False for metrics reported for information only (memberships). */
+  contributesToHold: boolean;
+}
+
+/** The counts behind a sync the mass-deletion guard held. Aggregates only. */
+export interface MassDeletionReport {
+  threshold: number;
+  users: DeletionMetric;
+  teams: DeletionMetric;
+  /** Informational cascade metric; absent when the backend could not measure it. */
+  memberships?: DeletionMetric;
+}
+
+/** The typed `code` the backend sets on a held sync. */
+export const MASS_DELETION_HOLD_CODE = 'mass_deletion_hold';
+
+/**
+ * Extracts the mass-deletion report from a failed sync, or null if the failure
+ * was something else.
+ *
+ * Recognition is by the typed `code` field, not by matching message text.
+ */
+export function getMassDeletionHold(error: unknown): MassDeletionReport | null {
+  const apiError = (error as APIRequestError | undefined)?.apiError as
+    | { code?: string; massDeletion?: MassDeletionReport }
+    | undefined;
+  if (!apiError || apiError.code !== MASS_DELETION_HOLD_CODE) return null;
+  return apiError.massDeletion ?? null;
+}
+
 /**
  * Triggers a manual organization sync
  *
  * Rewrites users, teams and memberships, so callers must clear the admin cache
  * on success or the UI will keep serving pre-sync counts for up to two minutes.
+ *
+ * `overrideMassDeletion` waives the backend's mass-deletion hold for this one
+ * request. It is only ever sent after an admin has reviewed the held counts and
+ * explicitly confirmed; the backend re-checks admin privileges and never trusts
+ * this flag on its own. A plain sync sends no body at all, so the normal request
+ * is byte-for-byte what it was before this option existed.
  */
-export async function syncOrganizationProvider(): Promise<OrganizationSyncResult> {
+export async function syncOrganizationProvider(
+  options: { overrideMassDeletion?: boolean } = {}
+): Promise<OrganizationSyncResult> {
+  const request: RequestInit = { method: 'POST' };
+  if (options.overrideMassDeletion) {
+    request.body = JSON.stringify({ overrideMassDeletion: true });
+  }
   return createApiClient<OrganizationSyncResult>(
     `${API_BASE_URL}/api/v1/admin/organization-provider/sync`,
-    { method: 'POST' }
+    request
   );
 }

@@ -54,3 +54,103 @@ func TestEvaluateMassDeletionGuard(t *testing.T) {
 		t.Errorf("deleting from a zero-current population should be treated as unsafe, got %v", err)
 	}
 }
+
+func TestMassDeletionHoldErrorCarriesTheGuardsOwnNumbers(t *testing.T) {
+	err := orgprovider.EvaluateMassDeletionGuard(100, 25, 50, 5, 20)
+
+	var hold *orgprovider.MassDeletionHoldError
+	if !errors.As(err, &hold) {
+		t.Fatalf("a tripped guard must return *MassDeletionHoldError, got %T", err)
+	}
+	if !errors.Is(err, orgprovider.ErrMassDeletionBlocked) {
+		t.Error("the typed error must still satisfy errors.Is(ErrMassDeletionBlocked) for existing callers")
+	}
+
+	users := hold.Report.Users
+	if users.Existing != 100 || users.Deleting != 25 {
+		t.Errorf("expected 25 of 100 users, got %d of %d", users.Deleting, users.Existing)
+	}
+	if users.Percent != 25 {
+		t.Errorf("expected 25%% users, got %v", users.Percent)
+	}
+	if !users.ExceedsThreshold || !users.ContributesToHold {
+		t.Error("the user metric drove this hold and must say so")
+	}
+
+	teams := hold.Report.Teams
+	if teams.Existing != 50 || teams.Deleting != 5 || teams.Percent != 10 {
+		t.Errorf("expected 5 of 50 teams at 10%%, got %d of %d at %v", teams.Deleting, teams.Existing, teams.Percent)
+	}
+	if teams.ExceedsThreshold {
+		t.Error("10%% teams is under the 20%% threshold and must not be marked as exceeding it")
+	}
+	if hold.Report.Threshold != 20 {
+		t.Errorf("expected the configured threshold to be reported, got %v", hold.Report.Threshold)
+	}
+	if hold.Report.Memberships != nil {
+		t.Error("the domain guard measures no memberships; persistence attaches that metric")
+	}
+}
+
+func TestBuildMassDeletionReportDoesNotDecide(t *testing.T) {
+	safe := orgprovider.BuildMassDeletionReport(100, 10, 50, 5, 20)
+	if safe.Held() {
+		t.Error("10%% of users and teams is under a 20%% threshold and must not be held")
+	}
+
+	// A zero population with deletions is treated as 100%, matching the
+	// guard's own "treat as unsafe" rule rather than dividing by zero.
+	edge := orgprovider.BuildMassDeletionReport(0, 1, 10, 0, 20)
+	if edge.Users.Percent != 100 || !edge.Held() {
+		t.Errorf("deleting from an empty population must read as 100%% and hold, got %v", edge.Users.Percent)
+	}
+}
+
+func TestMembershipMetricNeverContributesToHold(t *testing.T) {
+	// A cascade metric is informational: even at 100% it must not hold a sync.
+	metric := orgprovider.NewDeletionMetric(orgprovider.DeletionKindCascaded, 10, 10, 20, false)
+	if metric.Kind != orgprovider.DeletionKindCascaded {
+		t.Errorf("expected a cascaded metric, got %q", metric.Kind)
+	}
+	if !metric.ExceedsThreshold {
+		t.Error("100%% is over a 20%% threshold and the raw comparison should say so")
+	}
+	if metric.ContributesToHold {
+		t.Error("a cascade metric must never contribute to the hold")
+	}
+
+	report := orgprovider.BuildMassDeletionReport(100, 1, 50, 1, 20)
+	report.Memberships = &metric
+	if report.Held() {
+		t.Error("an over-threshold membership cascade must not turn a safe sync into a held one")
+	}
+}
+
+func TestWithIncomingReportsPayloadSizeWithoutChangingTheVerdict(t *testing.T) {
+	// The shape that makes a hold confusing in practice: every user came back
+	// from the provider, but almost no teams did. Users are untouched while
+	// teams look catastrophic -- and the incoming counts are what tell those
+	// two situations apart.
+	report := orgprovider.BuildMassDeletionReport(240, 0, 243, 237, 20)
+	before := report
+
+	report.WithIncoming(240, 6, 0)
+
+	if report.Users.Incoming != 240 || report.Teams.Incoming != 6 {
+		t.Errorf("incoming counts were not recorded: users=%d teams=%d", report.Users.Incoming, report.Teams.Incoming)
+	}
+	// 237/243 is the arithmetic, and it must be untouched by the reporting.
+	if report.Teams.Percent != before.Teams.Percent || report.Teams.Percent < 97.5 || report.Teams.Percent > 97.6 {
+		t.Errorf("expected teams at ~97.5%%, got %v", report.Teams.Percent)
+	}
+	if report.Users.Percent != 0 || report.Users.ExceedsThreshold {
+		t.Error("no user deletions means the user metric is at 0%% and cannot exceed the threshold")
+	}
+	if !report.Held() {
+		t.Error("teams alone at 97.5%% must still hold the sync")
+	}
+
+	// A nil membership metric must not panic.
+	report.Memberships = nil
+	report.WithIncoming(1, 2, 3)
+}

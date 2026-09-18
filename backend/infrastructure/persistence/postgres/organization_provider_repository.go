@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/agopalakrishnan/teams360/backend/domain/orgprovider"
@@ -103,10 +104,44 @@ func (r *OrganizationProviderRepository) ApplySnapshot(ctx context.Context, in o
 		return nil, fmt.Errorf("failed to evaluate team deletion scope: %w", err)
 	}
 
+	// The guard runs identically whether or not an override was requested --
+	// the override only changes what happens to its verdict. Either way the
+	// counts are measured, so an overridden sync can be audited with the same
+	// numbers the admin was shown when it was held.
 	if err := orgprovider.EvaluateMassDeletionGuard(
 		currentUserCount, len(missingUserIDs), currentTeamCount, len(missingTeamIDs), in.MaxDeletePercent,
 	); err != nil {
-		return nil, err
+		var hold *orgprovider.MassDeletionHoldError
+		if !errors.As(err, &hold) {
+			return nil, err
+		}
+
+		// Attach the membership cascade for the admin's review. This is read-
+		// only and informational: memberships never contribute to the hold (see
+		// DeletionMetric.ContributesToHold), so measuring them cannot change the
+		// verdict already reached above.
+		memberships, mErr := membershipCascadeMetric(ctx, tx, missingUserIDs, missingTeamIDs, in.MaxDeletePercent)
+		if mErr != nil {
+			return nil, fmt.Errorf("failed to measure membership cascade: %w", mErr)
+		}
+		hold.Report.Memberships = memberships
+
+		// What the provider actually sent, so an admin can tell an incomplete
+		// payload ("237 teams would go, but the provider only sent 6") apart
+		// from a real mass departure. Reporting only -- the verdict above is
+		// already decided.
+		hold.Report.WithIncoming(
+			len(in.Snapshot.Users), len(in.Snapshot.Teams), len(in.Snapshot.Memberships),
+		)
+
+		if !in.OverrideMassDeletion {
+			// Nothing has been written yet and the deferred Rollback discards
+			// the read-only transaction, so a held sync leaves THC untouched.
+			return nil, hold
+		}
+
+		waived := hold.Report
+		result.MassDeletionOverride = &waived
 	}
 
 	currentProtectedUserIDSet := make(map[string]bool, len(currentProtectedUserIDs))
@@ -201,6 +236,38 @@ func nonProtectedMissingIDs(
 	}
 
 	return missing, nonProtectedCount, protected, nil
+}
+
+// membershipCascadeMetric counts the team_members rows the proposed user and
+// team deletions would take with them. These rows are removed by the database
+// itself (team_members cascades from both users.id and teams.id -- see
+// migrations/000005_create_users_and_teams), not by a delete this sync issues,
+// so the metric is labelled DeletionKindCascaded and never contributes to the
+// hold. It deliberately does NOT include memberships that per-team
+// reconciliation would prune, which is a different operation measured after
+// the fact as ApplyResult.MembershipsRemoved.
+//
+// The denominator is every team_members row currently in THC, which is the
+// honest "of how many" for a cascade that can reach any of them.
+func membershipCascadeMetric(
+	ctx context.Context, tx *sql.Tx, missingUserIDs, missingTeamIDs []string, maxPercent float64,
+) (*orgprovider.DeletionMetric, error) {
+	var existing int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_members`).Scan(&existing); err != nil {
+		return nil, err
+	}
+
+	var cascaded int
+	if len(missingUserIDs) > 0 || len(missingTeamIDs) > 0 {
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM team_members WHERE user_id = ANY($1) OR team_id = ANY($2)
+		`, pq.Array(missingUserIDs), pq.Array(missingTeamIDs)).Scan(&cascaded); err != nil {
+			return nil, err
+		}
+	}
+
+	metric := orgprovider.NewDeletionMetric(orgprovider.DeletionKindCascaded, existing, cascaded, maxPercent, false)
+	return &metric, nil
 }
 
 // countHealthCheckTransitions measures how many teams actually change state, so

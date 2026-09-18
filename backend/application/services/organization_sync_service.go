@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"strconv"
@@ -74,8 +75,29 @@ type SyncResult struct {
 	TeamLeadsCleared     int                       `json:"teamLeadsCleared"`
 	MembershipsDiscarded int                       `json:"membershipsDiscarded"`
 
+	// MassDeletionOverridden reports that this run only completed because an
+	// administrator explicitly waived the mass-deletion hold, and MassDeletion
+	// carries the counts that were waived. Both are absent on a normal sync.
+	MassDeletionOverridden bool                            `json:"massDeletionOverridden,omitempty"`
+	MassDeletion           *orgprovider.MassDeletionReport `json:"massDeletion,omitempty"`
+
 	StartedAt   time.Time `json:"startedAt"`
 	CompletedAt time.Time `json:"completedAt"`
+}
+
+// SyncOptions carries per-request choices an administrator made. It is scoped
+// to one Sync call: nothing here is persisted, cached, or carried into the
+// next run.
+type SyncOptions struct {
+	// OverrideMassDeletion waives the mass-deletion percentage guard for this
+	// one run only, after an admin reviewed the held counts. The caller is
+	// responsible for having established that the requester is an
+	// administrator before setting it.
+	OverrideMassDeletion bool
+
+	// ActorUserID identifies who asked, for the audit record written when an
+	// override is used.
+	ActorUserID string
 }
 
 // OrganizationSyncService pulls an organization snapshot from the configured
@@ -114,12 +136,24 @@ func (s *OrganizationSyncService) Configured() bool {
 	return s.fetcher != nil
 }
 
-// Sync fetches, validates and applies a snapshot.
+// Sync fetches, validates and applies a snapshot with no overrides. This is
+// the normal path and its behaviour is unchanged: a sync over the
+// mass-deletion threshold is held.
+func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error) {
+	return s.SyncWithOptions(ctx, SyncOptions{})
+}
+
+// SyncWithOptions fetches, validates and applies a snapshot.
 //
 // Returns ErrSyncInProgress when another run holds the lock. All persistence
 // happens in a single transaction, so a failure at any point -- including the
 // mass-deletion guard tripping -- leaves THC untouched.
-func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error) {
+//
+// opts.OverrideMassDeletion waives one check and one check only. The snapshot
+// is still fetched fresh and revalidated here, the protected-record
+// allowlists still apply in persistence, and provider/transaction failures are
+// handled exactly as they are for a normal run.
+func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 	if !s.running.CompareAndSwap(false, true) {
 		return nil, ErrSyncInProgress
 	}
@@ -158,6 +192,7 @@ func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error)
 		PreservedMemberUserIDs:   filtered.PreservedMemberUserIDs,
 		PreserveReportsToUserIDs: filtered.PreserveReportsToUserIDs,
 		MaxDeletePercent:         maxDeletePercent(),
+		OverrideMassDeletion:     opts.OverrideMassDeletion,
 	})
 	if err != nil {
 		return nil, err
@@ -194,6 +229,29 @@ func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error)
 	if supervisorChainErr != nil {
 		result.Status = "completed_with_warnings"
 	}
+	if applied.MassDeletionOverride != nil {
+		result.MassDeletionOverridden = true
+		result.MassDeletion = applied.MassDeletionOverride
+
+		// An override is a deliberate, destructive, human decision, so it gets
+		// its own audit record naming who made it and exactly what it waived --
+		// not just a line in the completion log below.
+		report := applied.MassDeletionOverride
+		actor := opts.ActorUserID
+		if actor == "" {
+			actor = "unknown"
+		}
+		log.Security("org_sync_mass_deletion_override").
+			UserID(actor).
+			Details(fmt.Sprintf(
+				"administrator overrode the mass-deletion hold: users %d/%d (%.1f%%), teams %d/%d (%.1f%%), memberships cascaded %s, threshold %.1f%%",
+				report.Users.Deleting, report.Users.Existing, report.Users.Percent,
+				report.Teams.Deleting, report.Teams.Existing, report.Teams.Percent,
+				formatCascade(report.Memberships),
+				report.Threshold,
+			)).
+			Log()
+	}
 
 	log.WithFields(map[string]interface{}{
 		"usersSynced":       result.UsersSynced,
@@ -207,6 +265,14 @@ func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error)
 	return result, nil
 }
 
+// formatCascade renders the optional membership cascade for the audit line.
+func formatCascade(m *orgprovider.DeletionMetric) string {
+	if m == nil {
+		return "unmeasured"
+	}
+	return fmt.Sprintf("%d/%d (%.1f%%)", m.Deleting, m.Existing, m.Percent)
+}
+
 // maxDeletePercent reads the configurable mass-deletion threshold, falling
 // back to defaultMaxDeletePercent when unset or invalid.
 func maxDeletePercent() float64 {
@@ -215,7 +281,7 @@ func maxDeletePercent() float64 {
 		return defaultMaxDeletePercent
 	}
 	value, err := strconv.ParseFloat(raw, 64)
-// Reject NaN/Inf since they can bypass the percentage validation.
+	// Reject NaN/Inf since they can bypass the percentage validation.
 	if err != nil || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
 		return defaultMaxDeletePercent
 	}
