@@ -51,7 +51,10 @@ func TestFilterSnapshotKeepsACleanSnapshotIntact(t *testing.T) {
 		[]orgsnapshot.Membership{{UserID: "u1", TeamID: "t1"}, {UserID: "u2", TeamID: "t1"}},
 	)
 
-	got := services.FilterSnapshot(in, knownLevels())
+	got, err := services.FilterSnapshot(in, knownLevels())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(got.SkippedUsers) != 0 {
 		t.Errorf("SkippedUsers = %d, want 0", len(got.SkippedUsers))
@@ -79,7 +82,10 @@ func TestFilterSnapshotSkipsUsersWithUnusableLevels(t *testing.T) {
 		[]orgsnapshot.Membership{{UserID: "u1", TeamID: "t1"}},
 	)
 
-	got := services.FilterSnapshot(in, knownLevels())
+	got, err := services.FilterSnapshot(in, knownLevels())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(got.Snapshot.Users) != 1 || got.Snapshot.Users[0].ID != "u1" {
 		t.Fatalf("importable users = %+v, want only u1", got.Snapshot.Users)
@@ -125,7 +131,10 @@ func TestFilterSnapshotClearsUnresolvableManagerLinks(t *testing.T) {
 		nil,
 	)
 
-	got := services.FilterSnapshot(in, knownLevels())
+	got, err := services.FilterSnapshot(in, knownLevels())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if got.ClearedManagers != 2 {
 		t.Errorf("ClearedManagers = %d, want 2", got.ClearedManagers)
@@ -158,7 +167,10 @@ func TestFilterSnapshotDropsUnusableMemberships(t *testing.T) {
 		},
 	)
 
-	got := services.FilterSnapshot(in, knownLevels())
+	got, err := services.FilterSnapshot(in, knownLevels())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(got.Snapshot.Memberships) != 1 {
 		t.Fatalf("memberships = %+v, want exactly one", got.Snapshot.Memberships)
@@ -188,7 +200,10 @@ func TestFilterSnapshotClearsUnusableTeamLeads(t *testing.T) {
 		[]orgsnapshot.Membership{{UserID: "u1", TeamID: "t3"}},
 	)
 
-	got := services.FilterSnapshot(in, knownLevels())
+	got, err := services.FilterSnapshot(in, knownLevels())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	leads := map[string]*string{}
 	for _, tm := range got.Snapshot.Teams {
@@ -222,7 +237,10 @@ func TestFilterSnapshotPreservesTriStateHealthCheckFlag(t *testing.T) {
 		nil,
 	)
 
-	got := services.FilterSnapshot(in, knownLevels())
+	got, err := services.FilterSnapshot(in, knownLevels())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	flags := map[string]*bool{}
 	for _, tm := range got.Snapshot.Teams {
@@ -246,7 +264,9 @@ func TestFilterSnapshotDoesNotMutateItsInput(t *testing.T) {
 		nil,
 	)
 
-	services.FilterSnapshot(in, knownLevels())
+	if _, err := services.FilterSnapshot(in, knownLevels()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if in.Users[0].ReportsToID == nil {
 		t.Error("the caller's user slice was mutated")
@@ -257,12 +277,51 @@ func TestFilterSnapshotDoesNotMutateItsInput(t *testing.T) {
 }
 
 func TestFilterSnapshotHandlesNil(t *testing.T) {
-	got := services.FilterSnapshot(nil, knownLevels())
+	got, err := services.FilterSnapshot(nil, knownLevels())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if got.Snapshot != nil {
 		t.Error("nil input should not produce a snapshot")
 	}
 	if got.PreserveReportsToUserIDs == nil {
 		t.Error("PreserveReportsToUserIDs should always be usable")
+	}
+}
+
+func TestFilterSnapshotRejectsDuplicateUserIDWhenOneCopyIsSkipped(t *testing.T) {
+	// Two entries share id "u1": one has an unusable level and would be
+	// skipped, the other is importable. Without a raw-identity check, the
+	// filtered snapshot would keep only the importable copy, so
+	// orgsnapshot.Validate would never see the clash.
+	in := baseSnapshot(
+		[]orgsnapshot.User{
+			user("u1", "alice", "", nil),
+			user("u1", "alice2", "level-3", nil),
+		},
+		[]orgsnapshot.Team{{ID: "t1", Name: "Alcatraz"}},
+		nil,
+	)
+
+	_, err := services.FilterSnapshot(in, knownLevels())
+	if err == nil {
+		t.Fatal("expected an error for a duplicate user id, got nil")
+	}
+}
+
+func TestFilterSnapshotRejectsDuplicateUserIDWhenBothAreImportable(t *testing.T) {
+	in := baseSnapshot(
+		[]orgsnapshot.User{
+			user("u1", "alice", "level-3", nil),
+			user("u1", "alice2", "level-5", nil),
+		},
+		[]orgsnapshot.Team{{ID: "t1", Name: "Alcatraz"}},
+		nil,
+	)
+
+	_, err := services.FilterSnapshot(in, knownLevels())
+	if err == nil {
+		t.Fatal("expected an error for a duplicate user id, got nil")
 	}
 }

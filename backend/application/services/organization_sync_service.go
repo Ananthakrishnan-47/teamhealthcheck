@@ -18,15 +18,9 @@ import (
 )
 
 // EnvMaxDeletePercent names the environment variable configuring the
-// mass-deletion guard. See defaultMaxDeletePercent for the fallback.
+// mass-deletion guard. It is required -- there is no in-code fallback -- and
+// its value is set in .env (see .env.example).
 const EnvMaxDeletePercent = "ORG_SYNC_MAX_DELETE_PERCENT"
-
-// defaultMaxDeletePercent is deliberately conservative: a sync that would
-// remove more than a fifth of the currently-synced, non-protected users or
-// teams in one run is more likely a bad/incomplete snapshot than a real
-// mass-departure event, and should be held for human review rather than
-// applied automatically.
-const defaultMaxDeletePercent = 20.0
 
 // Errors returned by OrganizationSyncService. Handlers map these to status codes.
 var (
@@ -41,6 +35,10 @@ var (
 	// is distinct from an internal/DB failure: the handler maps it to 502
 	// Bad Gateway, since it genuinely reflects an unusable upstream response.
 	ErrProviderFetchFailed = errors.New("failed to fetch snapshot from provider")
+	// ErrMaxDeletePercentNotConfigured means ORG_SYNC_MAX_DELETE_PERCENT is
+	// unset, empty, or not a valid positive number. The mass-deletion guard
+	// has no in-code fallback, so a sync cannot proceed without it.
+	ErrMaxDeletePercentNotConfigured = errors.New("ORG_SYNC_MAX_DELETE_PERCENT is not configured")
 )
 
 // SnapshotFetcher fetches a complete organization snapshot from an external
@@ -94,6 +92,13 @@ type SyncOptions struct {
 	// responsible for having established that the requester is an
 	// administrator before setting it.
 	OverrideMassDeletion bool
+
+	// ConfirmedMassDeletion is the exact counts the admin reviewed before
+	// requesting OverrideMassDeletion. See orgprovider.ApplyInput's field of
+	// the same name: the override only takes effect when this still matches
+	// the freshly recomputed report, since this sync fetches its own fresh
+	// snapshot rather than replaying the one that produced the held counts.
+	ConfirmedMassDeletion *orgprovider.ConfirmedMassDeletion
 
 	// ActorUserID identifies who asked, for the audit record written when an
 	// override is used.
@@ -179,7 +184,12 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 		return nil, err
 	}
 
-	filtered := FilterSnapshot(snapshot, knownLevels)
+	filtered, err := FilterSnapshot(snapshot, knownLevels)
+	if err != nil {
+		// Names a record identity, not a credential, so it is safe to return
+		// to an admin and is the only way to diagnose a bad snapshot.
+		return nil, errors.Join(ErrInvalidSnapshot, err)
+	}
 
 	if err := filtered.Snapshot.ValidationError(); err != nil {
 		// Validation errors name records, not credentials, so they are safe to
@@ -187,12 +197,23 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 		return nil, errors.Join(ErrInvalidSnapshot, err)
 	}
 
+	maxDeletePercent, err := maxDeletePercent()
+	if err != nil {
+		return nil, err
+	}
+
 	applied, err := s.repo.ApplySnapshot(ctx, orgprovider.ApplyInput{
-		Snapshot:                 filtered.Snapshot,
+		Snapshot: filtered.Snapshot,
+		// The raw, pre-filter payload's own counts -- not len(filtered.Snapshot.*),
+		// which only reflects what survived filtering. See ApplyInput's doc.
+		IncomingUsers:            len(snapshot.Users),
+		IncomingTeams:            len(snapshot.Teams),
+		IncomingMemberships:      len(snapshot.Memberships),
 		PreservedMemberUserIDs:   filtered.PreservedMemberUserIDs,
 		PreserveReportsToUserIDs: filtered.PreserveReportsToUserIDs,
-		MaxDeletePercent:         maxDeletePercent(),
+		MaxDeletePercent:         maxDeletePercent,
 		OverrideMassDeletion:     opts.OverrideMassDeletion,
+		ConfirmedMassDeletion:    opts.ConfirmedMassDeletion,
 	})
 	if err != nil {
 		return nil, err
@@ -273,19 +294,20 @@ func formatCascade(m *orgprovider.DeletionMetric) string {
 	return fmt.Sprintf("%d/%d (%.1f%%)", m.Deleting, m.Existing, m.Percent)
 }
 
-// maxDeletePercent reads the configurable mass-deletion threshold, falling
-// back to defaultMaxDeletePercent when unset or invalid.
-func maxDeletePercent() float64 {
+// maxDeletePercent reads the mass-deletion threshold from
+// ORG_SYNC_MAX_DELETE_PERCENT. There is no in-code default: an unset, empty,
+// or invalid value is a configuration error, not something to guess past.
+func maxDeletePercent() (float64, error) {
 	raw := os.Getenv(EnvMaxDeletePercent)
 	if raw == "" {
-		return defaultMaxDeletePercent
+		return 0, ErrMaxDeletePercentNotConfigured
 	}
 	value, err := strconv.ParseFloat(raw, 64)
 	// Reject NaN/Inf since they can bypass the percentage validation.
 	if err != nil || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
-		return defaultMaxDeletePercent
+		return 0, ErrMaxDeletePercentNotConfigured
 	}
-	return value
+	return value, nil
 }
 
 // rederiveSupervisorChains refreshes team_supervisors for the synced teams,
@@ -301,8 +323,19 @@ func (s *OrganizationSyncService) rederiveSupervisorChains(ctx context.Context, 
 	var firstErr error
 
 	for _, t := range teams {
+		if orgprovider.IsProtectedTeam(t.ID) {
+			continue // persistence never updates a protected team, so its supervisor chain must not move either
+		}
+
 		stored, err := s.teamRepo.FindByID(ctx, t.ID)
-		if err != nil || stored == nil || stored.TeamLeadID == nil {
+		if err != nil {
+			log.Warn("failed to look up team " + t.ID + " for supervisor chain rederivation: " + err.Error())
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if stored == nil || stored.TeamLeadID == nil {
 			continue
 		}
 

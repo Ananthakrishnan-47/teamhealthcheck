@@ -154,3 +154,36 @@ func TestWithIncomingReportsPayloadSizeWithoutChangingTheVerdict(t *testing.T) {
 	report.Memberships = nil
 	report.WithIncoming(1, 2, 3)
 }
+
+// TestMassDeletionReportMatchesConfirmed pins down the fix for the TOCTOU gap
+// between a held sync's response and an admin's override: every sync
+// re-fetches its own fresh snapshot, so the override must be bound to the
+// exact counts reviewed, not just a bare flag.
+func TestMassDeletionReportMatchesConfirmed(t *testing.T) {
+	report := orgprovider.BuildMassDeletionReport(20, 6, 10, 3, 20)
+
+	exact := &orgprovider.ConfirmedMassDeletion{UsersExisting: 20, UsersDeleting: 6, TeamsExisting: 10, TeamsDeleting: 3}
+	if !report.MatchesConfirmed(exact) {
+		t.Error("a confirmation with the report's own counts must match")
+	}
+
+	if report.MatchesConfirmed(nil) {
+		t.Error("a nil confirmation must never match -- an override that omitted it must be refused, not silently allowed")
+	}
+
+	cases := []struct {
+		name      string
+		confirmed orgprovider.ConfirmedMassDeletion
+	}{
+		{"stale usersDeleting", orgprovider.ConfirmedMassDeletion{UsersExisting: 20, UsersDeleting: 5, TeamsExisting: 10, TeamsDeleting: 3}},
+		{"stale usersExisting", orgprovider.ConfirmedMassDeletion{UsersExisting: 19, UsersDeleting: 6, TeamsExisting: 10, TeamsDeleting: 3}},
+		{"stale teamsDeleting", orgprovider.ConfirmedMassDeletion{UsersExisting: 20, UsersDeleting: 6, TeamsExisting: 10, TeamsDeleting: 2}},
+		{"stale teamsExisting", orgprovider.ConfirmedMassDeletion{UsersExisting: 20, UsersDeleting: 6, TeamsExisting: 11, TeamsDeleting: 3}},
+	}
+	for _, c := range cases {
+		confirmed := c.confirmed
+		if report.MatchesConfirmed(&confirmed) {
+			t.Errorf("%s: a confirmation that no longer matches the fresh report must be refused", c.name)
+		}
+	}
+}

@@ -335,6 +335,28 @@ func TestValidate_UserFormats(t *testing.T) {
 	}
 }
 
+func TestValidate_RejectsAddressesTheDatabaseConstraintRejects(t *testing.T) {
+	// Each of these is a syntactically valid RFC 5322 address that
+	// net/mail.ParseAddress used to accept, but chk_users_email_format
+	// (migration 000013) and middleware.IsValidEmail both reject. Validate
+	// must reject them too, or the sync would pass contract validation and
+	// only fail later, mid-transaction, on the database CHECK constraint.
+	addresses := []string{
+		`"quoted local part"@example.com`,
+		"user@localhost",
+		"user@[192.168.1.1]",
+		"user@example.com (a comment)",
+	}
+	for _, email := range addresses {
+		snap := validSnapshot()
+		snap.Users[0].Email = email
+		errs := snap.Validate()
+		if !hasError(errs, orgsnapshot.EntityUser, "email", "") {
+			t.Errorf("email %q: expected a format error, got none", email)
+		}
+	}
+}
+
 func TestValidate_IDLessRecordsUseIndexes(t *testing.T) {
 	snap := validSnapshot()
 	snap.Users = []orgsnapshot.User{{}, {}}
@@ -342,6 +364,26 @@ func TestValidate_IDLessRecordsUseIndexes(t *testing.T) {
 		if err.Entity == orgsnapshot.EntityUser && err.Identifier == "" {
 			t.Fatalf("expected indexed user error, got %+v", err)
 		}
+	}
+}
+
+func TestValidate_IDLessTeamUsesIndexOnEveryField(t *testing.T) {
+	// A team missing both id and name must still let every one of its errors
+	// -- including "name" -- be tied back to it via the indexed identifier,
+	// since the empty id itself can't identify the record.
+	snap := validSnapshot()
+	snap.Teams = []orgsnapshot.Team{{}}
+	found := false
+	for _, err := range snap.Validate() {
+		if err.Entity == orgsnapshot.EntityTeam && err.Field == "name" {
+			found = true
+			if err.Identifier == "" {
+				t.Fatalf("expected an indexed identifier on the name error, got %+v", err)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected a name validation error for the id-less team")
 	}
 }
 

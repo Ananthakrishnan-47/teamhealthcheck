@@ -2,12 +2,19 @@ package orgsnapshot
 
 import (
 	"fmt"
-	"net/mail"
 	"regexp"
 	"strings"
 )
 
 var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{2,50}$`)
+
+// emailPattern mirrors chk_users_email_format (migration 000013) and
+// middleware.IsValidEmail exactly. net/mail.ParseAddress accepts RFC 5322
+// forms -- quoted local parts, comments, domain literals, TLD-less domains --
+// that the database CHECK constraint rejects; validating against that regex
+// here instead means a snapshot record that fails the database write is
+// caught as a contract violation up front, not as an upsert failure mid-sync.
+var emailPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
 // EntityType identifies the record type referenced by a ValidationError.
 type EntityType string
@@ -135,7 +142,7 @@ func (s Snapshot) Validate() ValidationErrors {
 				Message:    "hierarchyLevelId is required and must not exceed 50 characters",
 			})
 		}
-		if address, err := mail.ParseAddress(u.Email); err != nil || address.Address != u.Email {
+		if !emailPattern.MatchString(u.Email) {
 			errs = append(errs, ValidationError{
 				Entity:     EntityUser,
 				Identifier: identifier,
@@ -173,7 +180,7 @@ func (s Snapshot) Validate() ValidationErrors {
 		if t.Name == "" {
 			errs = append(errs, ValidationError{
 				Entity:     EntityTeam,
-				Identifier: t.ID,
+				Identifier: identifier,
 				Field:      "name",
 				Message:    "name is required and must be non-empty",
 			})
