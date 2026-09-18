@@ -910,6 +910,15 @@ export function getMassDeletionHold(error: unknown): MassDeletionReport | null {
   return apiError.massDeletion ?? null;
 }
 
+/** The four counts an admin reviewed on a held sync's response, echoed back
+ * to confirm an override. See syncOrganizationProvider. */
+export interface ConfirmedMassDeletion {
+  usersExisting: number;
+  usersDeleting: number;
+  teamsExisting: number;
+  teamsDeleting: number;
+}
+
 /**
  * Triggers a manual organization sync
  *
@@ -921,13 +930,23 @@ export function getMassDeletionHold(error: unknown): MassDeletionReport | null {
  * explicitly confirmed; the backend re-checks admin privileges and never trusts
  * this flag on its own. A plain sync sends no body at all, so the normal request
  * is byte-for-byte what it was before this option existed.
+ *
+ * `confirmedMassDeletion` is required alongside `overrideMassDeletion`: every
+ * sync re-fetches the provider snapshot fresh, so a bare override flag would
+ * waive the guard for whatever that fresh fetch turns up, which may no longer
+ * be the deletion the admin actually reviewed. Pass the exact counts from the
+ * `MassDeletionReport` the held response carried -- the backend refuses the
+ * override (returning a fresh hold instead) if they no longer match.
  */
 export async function syncOrganizationProvider(
-  options: { overrideMassDeletion?: boolean } = {}
+  options: { overrideMassDeletion?: boolean; confirmedMassDeletion?: ConfirmedMassDeletion } = {}
 ): Promise<OrganizationSyncResult> {
   const request: RequestInit = { method: 'POST' };
   if (options.overrideMassDeletion) {
-    request.body = JSON.stringify({ overrideMassDeletion: true });
+    request.body = JSON.stringify({
+      overrideMassDeletion: true,
+      confirmedMassDeletion: options.confirmedMassDeletion,
+    });
   }
   return createApiClient<OrganizationSyncResult>(
     `${API_BASE_URL}/api/v1/admin/organization-provider/sync`,

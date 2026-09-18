@@ -34,6 +34,24 @@ func TestNewClient_RejectsEmptyAPIToken(t *testing.T) {
 	}
 }
 
+func TestValidateBaseURL_AcceptsWhatNewClientAccepts(t *testing.T) {
+	if err := ValidateBaseURL("https://provider.example.com"); err != nil {
+		t.Fatalf("expected a valid base URL to pass, got %v", err)
+	}
+}
+
+func TestValidateBaseURL_RejectsWhatNewClientRejects(t *testing.T) {
+	if err := ValidateBaseURL("://not-a-valid-url"); err == nil {
+		t.Fatal("expected an error for an invalid base URL, got nil")
+	}
+}
+
+func TestValidateBaseURL_RejectsRelativeURL(t *testing.T) {
+	if err := ValidateBaseURL("/no-host"); err == nil {
+		t.Fatal("expected an error for a relative URL, got nil")
+	}
+}
+
 func TestNewClient_RejectsWhitespaceOnlyAPIToken(t *testing.T) {
 	client, err := NewClient(&Config{BaseURL: "https://provider.example.com", APIToken: "   "})
 	if err != ErrEmptyAPIToken {

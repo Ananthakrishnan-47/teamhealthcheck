@@ -40,10 +40,11 @@ func (f *fakeSyncRepository) ApplySnapshot(_ context.Context, in orgprovider.App
 	f.lastInput = in
 
 	// Mirror the real repository's contract: the guard is evaluated either way,
-	// and only the override decides whether its verdict is returned or waived.
+	// and only an override whose ConfirmedMassDeletion still matches this fresh
+	// report decides whether its verdict is returned or waived.
 	if f.holdReport != nil {
 		report := *f.holdReport
-		if !in.OverrideMassDeletion {
+		if !in.OverrideMassDeletion || !report.MatchesConfirmed(in.ConfirmedMassDeletion) {
 			return nil, &orgprovider.MassDeletionHoldError{Report: report}
 		}
 		return &orgprovider.ApplyResult{UsersDeleted: report.Users.Deleting, MassDeletionOverride: &report}, nil
@@ -95,6 +96,10 @@ var _ = Describe("Organization Provider Handler: mass-deletion override", func()
 		return &report
 	}
 
+	// overrideBody echoes heldReport()'s own counts back as confirmedMassDeletion,
+	// exactly as an admin's client would after reviewing that response.
+	const overrideBody = `{"overrideMassDeletion": true, "confirmedMassDeletion": {"usersExisting": 20, "usersDeleting": 6, "teamsExisting": 10, "teamsDeleting": 3}}`
+
 	// rewireFetcher rebuilds the router around a different provider fetcher,
 	// keeping the same repository so call counts stay observable.
 	rewireFetcher := func(fetcher services.SnapshotFetcher) {
@@ -123,6 +128,8 @@ var _ = Describe("Organization Provider Handler: mass-deletion override", func()
 		os.Setenv("JWT_SECRET", "test-secret-key-for-handler-tests")
 		os.Setenv(dataprovider.EnvBaseURL, "https://provider.invalid")
 		os.Setenv(dataprovider.EnvAPIToken, "handler-test-token")
+		// Mirrors the value .env.example documents as the production default.
+		os.Setenv(services.EnvMaxDeletePercent, "20")
 		gin.SetMode(gin.TestMode)
 
 		repo = &fakeSyncRepository{}
@@ -145,6 +152,7 @@ var _ = Describe("Organization Provider Handler: mass-deletion override", func()
 		os.Unsetenv("JWT_SECRET")
 		os.Unsetenv(dataprovider.EnvBaseURL)
 		os.Unsetenv(dataprovider.EnvAPIToken)
+		os.Unsetenv(services.EnvMaxDeletePercent)
 	})
 
 	It("returns the deletion counts, percentages and threshold when the sync is held", func() {
@@ -183,9 +191,12 @@ var _ = Describe("Organization Provider Handler: mass-deletion override", func()
 	It("passes an explicit admin override through to persistence", func() {
 		repo.holdReport = heldReport()
 
-		w := postSync(adminToken, `{"overrideMassDeletion": true}`)
+		w := postSync(adminToken, overrideBody)
 		Expect(w.Code).To(Equal(http.StatusOK), w.Body.String())
 		Expect(repo.lastInput.OverrideMassDeletion).To(BeTrue())
+		Expect(repo.lastInput.ConfirmedMassDeletion).To(Equal(&orgprovider.ConfirmedMassDeletion{
+			UsersExisting: 20, UsersDeleting: 6, TeamsExisting: 10, TeamsDeleting: 3,
+		}), "the confirmed counts from the request body must reach persistence unchanged")
 		Expect(repo.lastInput.MaxDeletePercent).To(Equal(20.0), "an override waives the verdict, it never changes the threshold")
 
 		var result services.SyncResult
@@ -195,10 +206,34 @@ var _ = Describe("Organization Provider Handler: mass-deletion override", func()
 		Expect(result.MassDeletion.Users.Deleting).To(Equal(6))
 	})
 
+	It("refuses an override whose confirmed counts no longer match a fresh hold", func() {
+		repo.holdReport = heldReport()
+
+		// Confirms a smaller deletion (5 users) than the fresh snapshot actually
+		// proposes (6) -- the provider's data changed since the admin reviewed
+		// the held response, so the override must not be honoured.
+		stale := `{"overrideMassDeletion": true, "confirmedMassDeletion": {"usersExisting": 20, "usersDeleting": 5, "teamsExisting": 10, "teamsDeleting": 3}}`
+		w := postSync(adminToken, stale)
+		Expect(w.Code).To(Equal(http.StatusConflict), w.Body.String())
+
+		var body dto.MassDeletionHoldResponseDTO
+		Expect(json.Unmarshal(w.Body.Bytes(), &body)).To(Succeed())
+		Expect(body.Applied).To(BeFalse())
+		Expect(body.MassDeletion.Users.Deleting).To(Equal(6), "the fresh report, not the stale confirmation, must be returned for re-review")
+	})
+
+	It("rejects an override request that omits the confirmation entirely", func() {
+		repo.holdReport = heldReport()
+
+		w := postSync(adminToken, `{"overrideMassDeletion": true}`)
+		Expect(w.Code).To(Equal(http.StatusBadRequest), w.Body.String())
+		Expect(repo.calls).To(BeZero(), "a bare override flag must never reach persistence")
+	})
+
 	It("scopes the override to the request carrying it", func() {
 		repo.holdReport = heldReport()
 
-		Expect(postSync(adminToken, `{"overrideMassDeletion": true}`).Code).To(Equal(http.StatusOK))
+		Expect(postSync(adminToken, overrideBody).Code).To(Equal(http.StatusOK))
 		Expect(postSync(adminToken, "").Code).To(Equal(http.StatusConflict), "the next sync must be held again")
 		Expect(repo.lastInput.OverrideMassDeletion).To(BeFalse())
 	})
@@ -206,7 +241,7 @@ var _ = Describe("Organization Provider Handler: mass-deletion override", func()
 	It("refuses an override from a non-admin without reaching persistence", func() {
 		repo.holdReport = heldReport()
 
-		w := postSync(memberToken, `{"overrideMassDeletion": true}`)
+		w := postSync(memberToken, overrideBody)
 		Expect(w.Code).To(Equal(http.StatusForbidden), w.Body.String())
 		Expect(repo.calls).To(BeZero(), "an unauthorized override must never reach the database")
 	})
@@ -221,7 +256,7 @@ var _ = Describe("Organization Provider Handler: mass-deletion override", func()
 		repo.holdReport = heldReport()
 		rewireFetcher(&fakeFetcher{badVersion: true})
 
-		w := postSync(adminToken, `{"overrideMassDeletion": true}`)
+		w := postSync(adminToken, overrideBody)
 		Expect(w.Code).To(Equal(http.StatusBadGateway), w.Body.String())
 		Expect(w.Body.String()).To(ContainSubstring("contract"))
 		Expect(repo.calls).To(BeZero(), "an override waives the deletion guard, never snapshot validation")
@@ -231,8 +266,72 @@ var _ = Describe("Organization Provider Handler: mass-deletion override", func()
 		repo.holdReport = heldReport()
 		rewireFetcher(&fakeFetcher{err: os.ErrDeadlineExceeded})
 
-		w := postSync(adminToken, `{"overrideMassDeletion": true}`)
+		w := postSync(adminToken, overrideBody)
 		Expect(w.Code).To(Equal(http.StatusBadGateway), w.Body.String())
 		Expect(repo.calls).To(BeZero(), "a provider failure must stop the sync even with an override")
+	})
+})
+
+// These specs pin down GetSettings' contract: BaseURLConfigured reflects
+// whether DATA_PROVIDER_BASE_URL is not just set, but usable by NewClient --
+// not merely non-empty.
+var _ = Describe("Organization Provider Handler: settings", func() {
+	var (
+		router     *gin.Engine
+		adminToken string
+	)
+
+	getSettings := func() *httptest.ResponseRecorder {
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/admin/settings/organization-provider", nil)
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	BeforeEach(func() {
+		os.Setenv("JWT_SECRET", "test-secret-key-for-settings-tests")
+		gin.SetMode(gin.TestMode)
+
+		syncService := services.NewOrganizationSyncService(&fakeSyncRepository{}, nil, nil, nil)
+		jwtService := services.NewJWTService()
+		adminPair, err := jwtService.GenerateTokenPair(context.Background(), "admin", "admin", "admin@test.com", "level-admin", nil)
+		Expect(err).NotTo(HaveOccurred())
+		adminToken = adminPair.AccessToken
+
+		router = gin.New()
+		v1.SetupOrganizationProviderRoutes(router, syncService, jwtService)
+	})
+
+	AfterEach(func() {
+		os.Unsetenv("JWT_SECRET")
+		os.Unsetenv(dataprovider.EnvBaseURL)
+		os.Unsetenv(dataprovider.EnvAPIToken)
+	})
+
+	It("reports the base URL as configured when it is a usable http(s) URL", func() {
+		os.Setenv(dataprovider.EnvBaseURL, "https://provider.example.com")
+		os.Setenv(dataprovider.EnvAPIToken, "token")
+
+		var body dto.OrganizationProviderSettingsDTO
+		Expect(json.Unmarshal(getSettings().Body.Bytes(), &body)).To(Succeed())
+		Expect(body.BaseURLConfigured).To(BeTrue())
+		Expect(body.TokenConfigured).To(BeTrue())
+	})
+
+	It("reports the base URL as not configured when it is set but malformed", func() {
+		os.Setenv(dataprovider.EnvBaseURL, "://not-a-valid-url")
+		os.Setenv(dataprovider.EnvAPIToken, "token")
+
+		var body dto.OrganizationProviderSettingsDTO
+		Expect(json.Unmarshal(getSettings().Body.Bytes(), &body)).To(Succeed())
+		Expect(body.BaseURLConfigured).To(BeFalse(), "a malformed URL is unusable, so it must not be reported as configured")
+	})
+
+	It("reports the base URL as not configured when it is empty", func() {
+		var body dto.OrganizationProviderSettingsDTO
+		Expect(json.Unmarshal(getSettings().Body.Bytes(), &body)).To(Succeed())
+		Expect(body.BaseURLConfigured).To(BeFalse())
 	})
 })

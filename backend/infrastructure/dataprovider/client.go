@@ -58,13 +58,9 @@ func NewClient(config *Config) (*Client, error) {
 		return nil, ErrEmptyAPIToken
 	}
 
-	baseURL, err := url.Parse(config.BaseURL)
+	baseURL, err := parseBaseURL(config.BaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("dataprovider: invalid base URL %q: %w", config.BaseURL, err)
-	}
-
-	if !baseURL.IsAbs() || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.Hostname() == "" {
-		return nil, fmt.Errorf("dataprovider: base URL %q must be an absolute http(s) URL", config.BaseURL)
+		return nil, err
 	}
 
 	return &Client{
@@ -75,6 +71,30 @@ func NewClient(config *Config) (*Client, error) {
 			CheckRedirect: rejectCrossOriginRedirect,
 		},
 	}, nil
+}
+
+// parseBaseURL parses and validates a data provider base URL: it must be an
+// absolute http(s) URL with a hostname. NewClient uses this to build its
+// client, and ValidateBaseURL exposes the same check to callers (the
+// settings handler) that need to validate a base URL without an API token.
+func parseBaseURL(raw string) (*url.URL, error) {
+	baseURL, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("dataprovider: invalid base URL %q: %w", raw, err)
+	}
+	if !baseURL.IsAbs() || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.Hostname() == "" {
+		return nil, fmt.Errorf("dataprovider: base URL %q must be an absolute http(s) URL", raw)
+	}
+	return baseURL, nil
+}
+
+// ValidateBaseURL reports whether raw would be accepted by NewClient as a
+// base URL. It performs the same check without requiring an API token, so
+// the settings handler can report DATA_PROVIDER_BASE_URL's validity on its
+// own.
+func ValidateBaseURL(raw string) error {
+	_, err := parseBaseURL(raw)
+	return err
 }
 
 // rejectCrossOriginRedirect stops the client from following a redirect to a
@@ -117,7 +137,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body io.Reader) (*
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-// Log raw URL-containing errors server-side; return only a fixed, credential-free error to callers.
+		// Log raw URL-containing errors server-side; return only a fixed, credential-free error to callers.
 		logger.Get().WithError(err).Error("dataprovider: request failed")
 		return nil, ErrRequestFailed
 	}

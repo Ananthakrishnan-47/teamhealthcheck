@@ -100,6 +100,18 @@ type ApplyInput struct {
 	// Snapshot contains only importable records.
 	Snapshot *orgsnapshot.Snapshot
 
+	// IncomingUsers/IncomingTeams/IncomingMemberships are the RAW provider
+	// payload's own record counts, before FilterSnapshot drops anything --
+	// unlike Snapshot, which only ever holds what survived filtering. A held
+	// sync's MassDeletionReport.WithIncoming needs the raw counts: comparing
+	// a big deletion against the filtered (importable) count would hide a
+	// payload where most records were sent but skipped for a bad hierarchy
+	// level, understating how much the provider actually sent and making an
+	// unsafe override look more justified than it is.
+	IncomingUsers       int
+	IncomingTeams       int
+	IncomingMemberships int
+
 	// PreservedMemberUserIDs are users excluded from the snapshot whose existing
 	// team_members rows must survive the per-team membership replace.
 	PreservedMemberUserIDs []string
@@ -117,7 +129,31 @@ type ApplyInput struct {
 	// explicitly asked for it. It waives nothing else: snapshot validation,
 	// the protected-record allowlists, and the single-transaction guarantee
 	// all still apply, and MaxDeletePercent itself is left untouched.
+	//
+	// Every sync re-fetches the provider snapshot fresh, including an override
+	// request -- so OverrideMassDeletion alone would let an admin approve one
+	// set of counts and have a completely different, unreviewed deletion
+	// applied if the provider's data changed in between. ConfirmedMassDeletion
+	// closes that gap: the override only takes effect when it still matches
+	// the freshly recomputed report (see MassDeletionReport.MatchesConfirmed).
 	OverrideMassDeletion bool
+
+	// ConfirmedMassDeletion is the exact counts an administrator reviewed
+	// before requesting OverrideMassDeletion. Required for the override to
+	// take effect; nil or stale (no longer matching the freshly recomputed
+	// report) is treated exactly like no override at all -- the sync is held
+	// again, with the current counts, for a fresh confirmation.
+	ConfirmedMassDeletion *ConfirmedMassDeletion
+}
+
+// ConfirmedMassDeletion is the counts an administrator actually reviewed
+// before overriding a held sync -- an echo of the MassDeletionReport the
+// held response carried, not a second calculation.
+type ConfirmedMassDeletion struct {
+	UsersExisting int
+	UsersDeleting int
+	TeamsExisting int
+	TeamsDeleting int
 }
 
 // ApplyResult reports what a sync changed.
@@ -232,6 +268,19 @@ func (r *MassDeletionReport) WithIncoming(users, teams, memberships int) {
 func (r MassDeletionReport) Held() bool {
 	return (r.Users.ContributesToHold && r.Users.ExceedsThreshold) ||
 		(r.Teams.ContributesToHold && r.Teams.ExceedsThreshold)
+}
+
+// MatchesConfirmed reports whether confirmed still describes r exactly. A nil
+// confirmed never matches -- an override request that omitted it is treated
+// the same as a stale one, since neither proves the admin reviewed r.
+func (r MassDeletionReport) MatchesConfirmed(confirmed *ConfirmedMassDeletion) bool {
+	if confirmed == nil {
+		return false
+	}
+	return confirmed.UsersExisting == r.Users.Existing &&
+		confirmed.UsersDeleting == r.Users.Deleting &&
+		confirmed.TeamsExisting == r.Teams.Existing &&
+		confirmed.TeamsDeleting == r.Teams.Deleting
 }
 
 // MassDeletionHoldError is the typed error a tripped guard returns. It wraps

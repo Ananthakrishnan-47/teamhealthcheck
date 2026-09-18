@@ -89,8 +89,34 @@ var _ = Describe("Integration: Organization Provider Sync", func() {
 		return w
 	}
 
+	// doOverrideSync mirrors the real admin flow: it first probes for the
+	// current hold and, when one exists, echoes that hold's own counts back
+	// as the confirmation -- exactly as a client would after reading the held
+	// sync's response. It never hardcodes the counts, so it keeps matching
+	// whatever each test's own fixture setup actually trips the guard with.
+	// If the probe itself does not come back as a hold (a non-admin token
+	// rejected before the guard ever runs, or a provider/validation failure
+	// that would fail identically on the real attempt too), it falls through
+	// with zeroed confirmation and lets the real request fail the same way.
 	doOverrideSync := func(token string) *httptest.ResponseRecorder {
-		return doSyncWithBody(token, `{"overrideMassDeletion": true}`)
+		confirmed := map[string]int{"usersExisting": 0, "usersDeleting": 0, "teamsExisting": 0, "teamsDeleting": 0}
+		if held := doSync(token); held.Code == http.StatusConflict {
+			var holdBody dto.MassDeletionHoldResponseDTO
+			Expect(json.Unmarshal(held.Body.Bytes(), &holdBody)).To(Succeed())
+			if holdBody.MassDeletion != nil {
+				confirmed["usersExisting"] = holdBody.MassDeletion.Users.Existing
+				confirmed["usersDeleting"] = holdBody.MassDeletion.Users.Deleting
+				confirmed["teamsExisting"] = holdBody.MassDeletion.Teams.Existing
+				confirmed["teamsDeleting"] = holdBody.MassDeletion.Teams.Deleting
+			}
+		}
+
+		body, err := json.Marshal(map[string]any{
+			"overrideMassDeletion":  true,
+			"confirmedMassDeletion": confirmed,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		return doSyncWithBody(token, string(body))
 	}
 
 	getSettings := func(token string) *httptest.ResponseRecorder {
@@ -261,6 +287,75 @@ var _ = Describe("Integration: Organization Provider Sync", func() {
 			var result services.SyncResult
 			Expect(json.Unmarshal(w.Body.Bytes(), &result)).To(Succeed())
 			Expect(result.HealthChecksDisabled).To(Equal(1))
+		})
+
+		It("should not count a protected team's healthCheckEnabled flag as a transition", func() {
+			_, err := db.Exec(`
+				INSERT INTO teams (id, name, health_check_enabled) VALUES ('sync-team-1', 'Alcatraz', true)
+			`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = db.Exec(`
+				INSERT INTO teams (id, name, health_check_enabled) VALUES ('team-phoenix', 'Phoenix', true)
+			`)
+			Expect(err).NotTo(HaveOccurred())
+
+			providerBody = `{
+				"contractVersion": "1.0",
+				"generatedAt": "2026-08-31T05:04:48.240Z",
+				"teams": [
+					{"id": "sync-team-1", "name": "Alcatraz", "healthCheckEnabled": false},
+					{"id": "team-phoenix", "name": "Phoenix", "healthCheckEnabled": false}
+				],
+				"users": [{"id": "sync-user-1", "username": "syncalice", "displayName": "Alice", "email": "syncalice@test.com", "hierarchyLevelId": "level-3"}],
+				"memberships": []
+			}`
+
+			w := doSync(adminToken)
+			Expect(w.Code).To(Equal(http.StatusOK), w.Body.String())
+
+			var result services.SyncResult
+			Expect(json.Unmarshal(w.Body.Bytes(), &result)).To(Succeed())
+			Expect(result.HealthChecksDisabled).To(Equal(1), "only the non-protected team's disable must be counted -- upsertSnapshotTeams never writes team-phoenix")
+
+			var stillEnabled bool
+			Expect(db.QueryRow(`SELECT health_check_enabled FROM teams WHERE id = 'team-phoenix'`).Scan(&stillEnabled)).To(Succeed())
+			Expect(stillEnabled).To(BeTrue(), "a protected team's health_check_enabled must never be written by a sync")
+		})
+
+		It("should not rebuild a protected team's supervisor chain", func() {
+			// sync-stale-supervisor has no reports_to, so if rederiveSupervisorChains
+			// ran for team-phoenix it would derive an empty chain and delete this row
+			// (UpdateSupervisorChain replaces a team's chain wholesale).
+			_, err := db.Exec(`
+				INSERT INTO users (id, username, email, full_name, hierarchy_level_id, password_hash)
+				VALUES ('sync-stale-supervisor', 'stalesup', 'stalesup@test.com', 'Stale Supervisor', 'level-3', '')
+			`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = db.Exec(`
+				INSERT INTO teams (id, name, team_lead_id) VALUES ('team-phoenix', 'Phoenix', 'sync-stale-supervisor')
+			`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = db.Exec(`
+				INSERT INTO team_supervisors (team_id, user_id, hierarchy_level_id, position) VALUES ('team-phoenix', 'sync-stale-supervisor', 'level-3', 1)
+			`)
+			Expect(err).NotTo(HaveOccurred())
+
+			providerBody = `{
+				"contractVersion": "1.0",
+				"generatedAt": "2026-08-31T05:04:48.240Z",
+				"teams": [
+					{"id": "sync-team-1", "name": "Alcatraz"},
+					{"id": "team-phoenix", "name": "Phoenix"}
+				],
+				"users": [{"id": "sync-user-1", "username": "syncalice", "displayName": "Alice", "email": "syncalice@test.com", "hierarchyLevelId": "level-3"}],
+				"memberships": []
+			}`
+
+			Expect(doSync(adminToken).Code).To(Equal(http.StatusOK))
+
+			Expect(countRows(`
+				SELECT COUNT(*) FROM team_supervisors WHERE team_id = 'team-phoenix' AND user_id = 'sync-stale-supervisor'
+			`)).To(Equal(1), "a protected team's supervisor chain must never be rebuilt by a sync")
 		})
 
 		It("should preserve the existing team-lead value when the provider omits teamLeadId", func() {
@@ -596,6 +691,10 @@ var _ = Describe("Integration: Organization Provider Sync", func() {
 			second := doSync(adminToken)
 			Expect(second.Code).To(Equal(http.StatusConflict), second.Body.String())
 
+			var body dto.ErrorResponse
+			Expect(json.Unmarshal(second.Body.Bytes(), &body)).To(Succeed())
+			Expect(body.Message).NotTo(BeEmpty(), "the frontend reads message, not error -- an empty message falls back to the generic '409 Conflict' status text")
+
 			close(providerGate)
 			Eventually(done, "10s").Should(Receive(Equal(http.StatusOK)))
 		})
@@ -717,8 +816,11 @@ var _ = Describe("Integration: Organization Provider Sync", func() {
 			Expect(report.Users.ContributesToHold).To(BeTrue())
 			Expect(report.Users.ExceedsThreshold).To(BeTrue())
 			// The diagnostic half of the report: what the provider actually sent.
-			// snapshotWithLevels carries 4 users, of which 2 are importable.
-			Expect(report.Users.Incoming).To(Equal(2), "incoming counts the importable records the provider supplied")
+			// snapshotWithLevels carries 4 users, of which only 2 are importable --
+			// Incoming must count the raw payload, not the filtered/importable
+			// subset, or a payload with many bad-level records would misreport
+			// as an incomplete one.
+			Expect(report.Users.Incoming).To(Equal(4), "incoming counts every record the provider sent, including ones the filter later skips")
 
 			// Only sync-doomed-team exists and it is absent from the snapshot.
 			Expect(report.Teams.Existing).To(Equal(1))
@@ -733,6 +835,36 @@ var _ = Describe("Integration: Organization Provider Sync", func() {
 			Expect(report.Memberships.Existing).To(Equal(1))
 			Expect(report.Memberships.Deleting).To(Equal(1))
 			Expect(report.Memberships.ContributesToHold).To(BeFalse())
+		})
+
+		It("should not count a missing user's membership in a surviving team as cascaded", func() {
+			// sync-team-1 is one of snapshotWithLevels' own teams, so it survives
+			// this sync -- its membership is reconciled by an explicit per-team
+			// DELETE (MembershipsRemoved), not by an FK cascade on a hard-deleted
+			// team or user. The cascade metric must not double-label that row.
+			seedBulkUsers(5)
+			_, err := db.Exec(`INSERT INTO teams (id, name) VALUES ('sync-team-1', 'Alcatraz')`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = db.Exec(`INSERT INTO team_members (team_id, user_id) VALUES ('sync-team-1', 'sync-bulk-a')`)
+			Expect(err).NotTo(HaveOccurred())
+
+			held := doSync(adminToken)
+			Expect(held.Code).To(Equal(http.StatusConflict), held.Body.String())
+
+			report := decodeHold(held).MassDeletion
+			Expect(report.Memberships).NotTo(BeNil())
+			Expect(report.Memberships.Existing).To(Equal(1))
+			Expect(report.Memberships.Deleting).To(Equal(0),
+				"sync-team-1 survives, so sync-bulk-a's row there is pruned by the explicit per-team reconciliation, not an FK cascade")
+
+			// Confirm the row is still genuinely removed -- just correctly
+			// attributed to MembershipsRemoved instead of the cascade metric.
+			w := doOverrideSync(adminToken)
+			Expect(w.Code).To(Equal(http.StatusOK), w.Body.String())
+			var result services.SyncResult
+			Expect(json.Unmarshal(w.Body.Bytes(), &result)).To(Succeed())
+			Expect(result.MembershipsRemoved).To(Equal(1))
+			Expect(countRows(`SELECT COUNT(*) FROM team_members WHERE team_id = 'sync-team-1' AND user_id = 'sync-bulk-a'`)).To(BeZero())
 		})
 
 		It("should write nothing at all while held", func() {
@@ -769,6 +901,66 @@ var _ = Describe("Integration: Organization Provider Sync", func() {
 
 			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%'`)).To(BeZero())
 			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-user-%'`)).To(Equal(2), "the snapshot's users are imported by the overridden run")
+		})
+
+		It("should refuse a stale override and hold again on the fresh counts when the deletion scope changes between the hold and the confirmation", func() {
+			seedBulkUsers(5)
+
+			held := doSync(adminToken)
+			Expect(held.Code).To(Equal(http.StatusConflict))
+			var staleHold dto.MassDeletionHoldResponseDTO
+			Expect(json.Unmarshal(held.Body.Bytes(), &staleHold)).To(Succeed())
+			Expect(staleHold.MassDeletion.Users.Existing).To(Equal(5))
+			Expect(staleHold.MassDeletion.Users.Deleting).To(Equal(5))
+
+			// The deletion scope changes after the admin reviewed this report but
+			// before they confirmed the override -- the exact race the fix closes.
+			// A real cause would be the provider's snapshot changing; growing the
+			// current non-protected population produces the identical effect on
+			// the guard's fresh recomputation without needing a second payload.
+			_, err := db.Exec(`
+				INSERT INTO users (id, username, email, full_name, hierarchy_level_id, password_hash) VALUES
+				('sync-more-a', 'sync-more-a', 'sync-more-a@test.com', 'sync-more-a', 'level-5', ''),
+				('sync-more-b', 'sync-more-b', 'sync-more-b@test.com', 'sync-more-b', 'level-5', ''),
+				('sync-more-c', 'sync-more-c', 'sync-more-c@test.com', 'sync-more-c', 'level-5', '')
+			`)
+			Expect(err).NotTo(HaveOccurred())
+
+			staleConfirmation, err := json.Marshal(map[string]any{
+				"overrideMassDeletion": true,
+				"confirmedMassDeletion": map[string]int{
+					"usersExisting": staleHold.MassDeletion.Users.Existing,
+					"usersDeleting": staleHold.MassDeletion.Users.Deleting,
+					"teamsExisting": staleHold.MassDeletion.Teams.Existing,
+					"teamsDeleting": staleHold.MassDeletion.Teams.Deleting,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			w := doSyncWithBody(adminToken, string(staleConfirmation))
+			Expect(w.Code).To(Equal(http.StatusConflict), "a stale confirmation must be refused, not silently applied to whatever the fresh count now shows")
+
+			var freshHold dto.MassDeletionHoldResponseDTO
+			Expect(json.Unmarshal(w.Body.Bytes(), &freshHold)).To(Succeed())
+			Expect(freshHold.MassDeletion.Users.Existing).To(Equal(8), "the fresh report reflects the changed population, for the admin to re-review")
+			Expect(freshHold.MassDeletion.Users.Deleting).To(Equal(8))
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%' OR id LIKE 'sync-more-%'`)).To(Equal(8), "nothing may be deleted on a refused override")
+
+			// Confirming the fresh counts instead succeeds.
+			freshConfirmation, err := json.Marshal(map[string]any{
+				"overrideMassDeletion": true,
+				"confirmedMassDeletion": map[string]int{
+					"usersExisting": freshHold.MassDeletion.Users.Existing,
+					"usersDeleting": freshHold.MassDeletion.Users.Deleting,
+					"teamsExisting": freshHold.MassDeletion.Teams.Existing,
+					"teamsDeleting": freshHold.MassDeletion.Teams.Deleting,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			w2 := doSyncWithBody(adminToken, string(freshConfirmation))
+			Expect(w2.Code).To(Equal(http.StatusOK), w2.Body.String())
+			Expect(countRows(`SELECT COUNT(*) FROM users WHERE id LIKE 'sync-bulk-%' OR id LIKE 'sync-more-%'`)).To(BeZero())
 		})
 
 		It("should scope the override to the one request carrying it", func() {
@@ -840,8 +1032,8 @@ var _ = Describe("Integration: Organization Provider Sync", func() {
 		It("should still preserve health-check history when overriding", func() {
 			seedBulkUsers(1)
 			_, err := db.Exec(`
-				INSERT INTO health_check_sessions (id, user_id, team_id, assessment_period, completed_at)
-				VALUES ('sync-override-session', 'sync-bulk-a', 'sync-doomed-team', '2026 - 1st Half', CURRENT_TIMESTAMP)
+				INSERT INTO health_check_sessions (id, user_id, team_id, date, assessment_period, completed)
+				VALUES ('sync-override-session', 'sync-bulk-a', 'sync-doomed-team', '2026-09-01', '2026 - 1st Half', true)
 			`)
 			Expect(err).NotTo(HaveOccurred())
 

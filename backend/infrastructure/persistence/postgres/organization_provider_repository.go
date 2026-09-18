@@ -84,6 +84,19 @@ func (r *OrganizationProviderRepository) ApplySnapshot(ctx context.Context, in o
 		snapshotTeamIDs[t.ID] = true
 	}
 
+	// reconciledTeamIDs are the non-protected teams present in the snapshot --
+	// exactly the teams replaceSnapshotMemberships explicitly reconciles below.
+	// A missing user's row in one of these teams is removed by that team's
+	// explicit DELETE (and counted in ApplyResult.MembershipsRemoved), not by
+	// an FK cascade; membershipCascadeMetric needs this set to avoid counting
+	// those rows twice, once correctly and once mislabeled as "cascaded".
+	reconciledTeamIDs := make([]string, 0, len(in.Snapshot.Teams))
+	for _, t := range in.Snapshot.Teams {
+		if !orgprovider.IsProtectedTeam(t.ID) {
+			reconciledTeamIDs = append(reconciledTeamIDs, t.ID)
+		}
+	}
+
 	// The mass-deletion guard runs before any write in this transaction: it
 	// must see the database exactly as it stood before this sync, and it must
 	// block every subsequent step (including the read-only health-check-
@@ -120,7 +133,7 @@ func (r *OrganizationProviderRepository) ApplySnapshot(ctx context.Context, in o
 		// only and informational: memberships never contribute to the hold (see
 		// DeletionMetric.ContributesToHold), so measuring them cannot change the
 		// verdict already reached above.
-		memberships, mErr := membershipCascadeMetric(ctx, tx, missingUserIDs, missingTeamIDs, in.MaxDeletePercent)
+		memberships, mErr := membershipCascadeMetric(ctx, tx, missingUserIDs, missingTeamIDs, reconciledTeamIDs, in.MaxDeletePercent)
 		if mErr != nil {
 			return nil, fmt.Errorf("failed to measure membership cascade: %w", mErr)
 		}
@@ -129,12 +142,20 @@ func (r *OrganizationProviderRepository) ApplySnapshot(ctx context.Context, in o
 		// What the provider actually sent, so an admin can tell an incomplete
 		// payload ("237 teams would go, but the provider only sent 6") apart
 		// from a real mass departure. Reporting only -- the verdict above is
-		// already decided.
+		// already decided. These are the raw, pre-filter counts (in.IncomingUsers
+		// etc.) rather than len(in.Snapshot.Users) etc. -- in.Snapshot only holds
+		// what survived filtering, so using it here would undercount a payload
+		// where most records were sent but skipped for a bad hierarchy level.
 		hold.Report.WithIncoming(
-			len(in.Snapshot.Users), len(in.Snapshot.Teams), len(in.Snapshot.Memberships),
+			in.IncomingUsers, in.IncomingTeams, in.IncomingMemberships,
 		)
 
-		if !in.OverrideMassDeletion {
+		if !in.OverrideMassDeletion || !hold.Report.MatchesConfirmed(in.ConfirmedMassDeletion) {
+			// Either no override was requested, or the provider's data changed
+			// between the held response and this confirmation -- ConfirmedMassDeletion
+			// no longer matches what the guard just recomputed. Either way the admin
+			// has not reviewed these exact numbers, so nothing is written and a fresh
+			// hold (with the current counts) is returned for them to confirm again.
 			// Nothing has been written yet and the deferred Rollback discards
 			// the read-only transaction, so a held sync leaves THC untouched.
 			return nil, hold
@@ -249,8 +270,17 @@ func nonProtectedMissingIDs(
 //
 // The denominator is every team_members row currently in THC, which is the
 // honest "of how many" for a cascade that can reach any of them.
+// membershipCascadeMetric measures only rows a hard-delete removes as an FK
+// cascade, per DeletionKindCascaded's own definition -- never a row
+// replaceSnapshotMemberships would prune explicitly through its per-team
+// reconciliation DELETE (counted separately in ApplyResult.MembershipsRemoved).
+// A missing team's rows always qualify: the team itself is being hard-deleted,
+// and nothing reconciles a team that isn't in the snapshot. A missing user's
+// row only qualifies when its team is NOT one reconciledTeamIDs names --
+// otherwise that row is removed by the explicit DELETE, not by cascade, and
+// counting it here would double-label a pruned row as cascaded.
 func membershipCascadeMetric(
-	ctx context.Context, tx *sql.Tx, missingUserIDs, missingTeamIDs []string, maxPercent float64,
+	ctx context.Context, tx *sql.Tx, missingUserIDs, missingTeamIDs, reconciledTeamIDs []string, maxPercent float64,
 ) (*orgprovider.DeletionMetric, error) {
 	var existing int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_members`).Scan(&existing); err != nil {
@@ -260,8 +290,10 @@ func membershipCascadeMetric(
 	var cascaded int
 	if len(missingUserIDs) > 0 || len(missingTeamIDs) > 0 {
 		if err := tx.QueryRowContext(ctx, `
-			SELECT COUNT(*) FROM team_members WHERE user_id = ANY($1) OR team_id = ANY($2)
-		`, pq.Array(missingUserIDs), pq.Array(missingTeamIDs)).Scan(&cascaded); err != nil {
+			SELECT COUNT(*) FROM team_members
+			WHERE team_id = ANY($1)
+			   OR (user_id = ANY($2) AND team_id <> ALL($3))
+		`, pq.Array(missingTeamIDs), pq.Array(missingUserIDs), pq.Array(reconciledTeamIDs)).Scan(&cascaded); err != nil {
 			return nil, err
 		}
 	}
@@ -275,6 +307,9 @@ func membershipCascadeMetric(
 func countHealthCheckTransitions(ctx context.Context, tx *sql.Tx, in orgprovider.ApplyInput, result *orgprovider.ApplyResult) error {
 	var disabling, enabling []string
 	for _, t := range in.Snapshot.Teams {
+		if orgprovider.IsProtectedTeam(t.ID) {
+			continue // upsertSnapshotTeams never writes a protected team, so it can never transition
+		}
 		if t.HealthCheckEnabled == nil {
 			continue // omitted preserves the existing value
 		}

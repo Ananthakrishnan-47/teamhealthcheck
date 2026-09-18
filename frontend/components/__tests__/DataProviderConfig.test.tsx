@@ -26,6 +26,7 @@ import {
   readSyncState,
   writeSyncState,
   setActiveSyncPromise,
+  setActiveRequestId,
   SYNC_STALE_TIMEOUT_MS,
 } from '@/lib/admin-sync-state';
 
@@ -95,12 +96,14 @@ beforeEach(() => {
   // can reattach to the real in-flight request) -- reset it between tests so
   // one spec's in-flight promise can't leak into the next.
   setActiveSyncPromise(null);
+  setActiveRequestId(null);
 });
 
 afterEach(() => {
   vi.useRealTimers();
   localStorage.clear();
   setActiveSyncPromise(null);
+  setActiveRequestId(null);
 });
 
 describe('DataProviderConfig — Sync Now button', () => {
@@ -352,8 +355,8 @@ describe('DataProviderConfig — persisted sync state (reload, tab switch, navig
     let release: (v: unknown) => void = () => {};
     sync.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
 
-    const { unmount } = render(<DataProviderConfig />);
     getSettings.mockResolvedValue(READY);
+    const { unmount } = render(<DataProviderConfig />);
     await screen.findByTestId('sync-now-btn');
     await user.click(screen.getByTestId('sync-now-btn'));
     await waitFor(() => expect(sync).toHaveBeenCalledTimes(1));
@@ -393,10 +396,97 @@ describe('DataProviderConfig — persisted sync state (reload, tab switch, navig
     await waitFor(() => expect(screen.getByTestId('sync-now-btn')).toBeEnabled());
   });
 
+  it('surfaces the completion banner on remount when the sync finished entirely while unmounted', async () => {
+    let release: (v: unknown) => void = () => {};
+    sync.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    getSettings.mockResolvedValue(READY);
+
+    const { unmount } = render(<DataProviderConfig />);
+    await screen.findByTestId('sync-now-btn');
+    await userEvent.setup().click(screen.getByTestId('sync-now-btn'));
+    await waitFor(() => expect(sync).toHaveBeenCalledTimes(1));
+
+    unmount();
+
+    // The sync completes while nothing is mounted to observe it, then the
+    // admin returns to the tab afterward -- not while it is still pending.
+    await act(async () => {
+      release(SYNC_RESULT);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    render(<DataProviderConfig />);
+    await screen.findByTestId('sync-now-btn');
+
+    expect(await screen.findByTestId('sync-result')).toBeInTheDocument();
+  });
+
   it('leaves an idle, enabled button on mount when no sync is active (unchanged existing behavior)', async () => {
     await renderReady();
     expect(screen.getByTestId('sync-now-btn')).toBeEnabled();
     expect(readSyncState()).toBeNull();
+  });
+
+  // The browser only fires `storage` in tabs OTHER than the one that made the
+  // change, so a manually dispatched StorageEvent here is exactly what a
+  // second tab -- mounted before this one started (or finished) a sync --
+  // would receive. Without reacting to it, that tab would keep showing an
+  // enabled button and could clobber this tab's in-progress record by
+  // clicking Sync Now itself.
+  it('disables the button in real time when another tab starts a sync, without a remount', async () => {
+    await renderReady();
+    expect(screen.getByTestId('sync-now-btn')).toBeEnabled();
+
+    const otherTabRequestId = writeSyncState('in_progress');
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: 'adminSyncState',
+          newValue: JSON.stringify(readSyncState()),
+        })
+      );
+    });
+
+    await waitFor(() => expect(screen.getByTestId('sync-now-btn')).toBeDisabled());
+    expect(sync).not.toHaveBeenCalled();
+
+    // The other tab finishes and clears its own record.
+    const { clearSyncState } = await import('@/lib/admin-sync-state');
+    clearSyncState(otherTabRequestId);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'adminSyncState', newValue: null }));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('sync-now-btn')).toBeEnabled());
+  });
+
+  it("does not let this tab's stale-timeout clear erase a newer record another tab has since written", async () => {
+    // This tab discovers an in-progress record left over from a reload and
+    // starts timing it out.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const staleOwnerRequestId = writeSyncState('in_progress', Date.now());
+    getSettings.mockResolvedValue(READY);
+
+    render(<DataProviderConfig />);
+    await waitFor(() => expect(screen.getByTestId('sync-now-btn')).toBeDisabled());
+
+    // Before the timeout fires, a different tab starts its own, genuinely
+    // fresh sync -- taking over the shared slot with a new requestId.
+    const { clearSyncState } = await import('@/lib/admin-sync-state');
+    const freshRequestId = writeSyncState('in_progress', Date.now());
+    expect(freshRequestId).not.toBe(staleOwnerRequestId);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_STALE_TIMEOUT_MS + 100);
+    });
+
+    // The old record's timeout fired, but clearSyncState was scoped to the
+    // requestId it originally read, so it must not have erased the newer one.
+    const state = readSyncState();
+    expect(state).not.toBeNull();
+    expect(state?.requestId).toBe(freshRequestId);
+    clearSyncState(freshRequestId);
   });
 });
 
@@ -502,7 +592,10 @@ describe('DataProviderConfig — mass-deletion hold and Sync Anyway override', (
     expect(screen.getByTestId('sync-override-applied')).toBeInTheDocument();
     expect(screen.getByTestId('sync-deleted')).toHaveTextContent('6 user(s) and 3 team(s) removed');
 
-    expect(sync).toHaveBeenNthCalledWith(2, { overrideMassDeletion: true });
+    expect(sync).toHaveBeenNthCalledWith(2, {
+      overrideMassDeletion: true,
+      confirmedMassDeletion: { usersExisting: 20, usersDeleting: 6, teamsExisting: 10, teamsDeleting: 3 },
+    });
     // The hold is resolved, so the warning and its buttons are gone.
     expect(screen.queryByTestId('sync-mass-deletion-hold')).not.toBeInTheDocument();
     expect(clearCache).toHaveBeenCalled();

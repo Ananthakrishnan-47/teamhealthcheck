@@ -26,6 +26,24 @@ type OrganizationSyncRequestDTO struct {
 	// authenticated administrator and only for the request carrying it -- it is
 	// never stored, and it never changes the configured threshold.
 	OverrideMassDeletion bool `json:"overrideMassDeletion"`
+
+	// ConfirmedMassDeletion echoes the counts the admin reviewed on the held
+	// sync's response, and is required when OverrideMassDeletion is true. Every
+	// sync re-fetches the provider snapshot fresh, so without this the backend
+	// would have no way to tell whether the admin's confirmation still matches
+	// what is actually about to be deleted. A missing or stale value (no longer
+	// matching a freshly recomputed report) is refused, not silently ignored.
+	ConfirmedMassDeletion *ConfirmedMassDeletionDTO `json:"confirmedMassDeletion,omitempty"`
+}
+
+// ConfirmedMassDeletionDTO carries the four counts an admin reviewed before
+// checking overrideMassDeletion -- an echo of the corresponding fields on
+// MassDeletionReportDTO, not a client-computed value.
+type ConfirmedMassDeletionDTO struct {
+	UsersExisting int `json:"usersExisting"`
+	UsersDeleting int `json:"usersDeleting"`
+	TeamsExisting int `json:"teamsExisting"`
+	TeamsDeleting int `json:"teamsDeleting"`
 }
 
 // DeletionMetricDTO is one entity type's share of a proposed deletion, shown to

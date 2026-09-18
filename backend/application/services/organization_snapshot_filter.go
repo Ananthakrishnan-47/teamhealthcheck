@@ -1,6 +1,8 @@
 package services
 
 import (
+	"fmt"
+
 	"github.com/agopalakrishnan/teams360/backend/domain/orgprovider"
 	"github.com/agopalakrishnan/teams360/backend/pkg/orgsnapshot"
 )
@@ -41,12 +43,29 @@ type SnapshotFilterResult struct {
 //
 // Nothing here invents data. Every repair either drops a record or clears a
 // reference, and each is counted so the sync can report exactly what happened.
-func FilterSnapshot(in *orgsnapshot.Snapshot, knownLevels map[string]bool) SnapshotFilterResult {
+//
+// Duplicate user IDs are rejected here, on the raw input, before that
+// classification runs: if one copy of a duplicated ID is skipped for its
+// hierarchy level, classification would otherwise keep only the other copy,
+// so the filtered snapshot handed to orgsnapshot.Validate would contain a
+// single, non-duplicated ID and the contract violation would never surface.
+func FilterSnapshot(in *orgsnapshot.Snapshot, knownLevels map[string]bool) (SnapshotFilterResult, error) {
 	result := SnapshotFilterResult{
 		PreserveReportsToUserIDs: make(map[string]bool),
 	}
 	if in == nil {
-		return result
+		return result, nil
+	}
+
+	seenUserIDs := make(map[string]bool, len(in.Users))
+	for _, u := range in.Users {
+		if u.ID == "" {
+			continue // Validate reports every empty ID on its own; this check is about duplicate identity, not missing identity
+		}
+		if seenUserIDs[u.ID] {
+			return result, fmt.Errorf("duplicate user id %q in snapshot", u.ID)
+		}
+		seenUserIDs[u.ID] = true
 	}
 
 	importable := make(map[string]bool, len(in.Users))
@@ -141,5 +160,5 @@ func FilterSnapshot(in *orgsnapshot.Snapshot, knownLevels map[string]bool) Snaps
 		Memberships:     memberships,
 	}
 
-	return result
+	return result, nil
 }
