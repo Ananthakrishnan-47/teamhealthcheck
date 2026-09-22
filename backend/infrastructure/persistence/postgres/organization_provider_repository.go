@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/agopalakrishnan/teams360/backend/domain/orgprovider"
 	"github.com/lib/pq"
@@ -16,7 +17,15 @@ type OrganizationProviderRepository struct {
 }
 
 // NewOrganizationProviderRepository creates a new repository instance.
-func NewOrganizationProviderRepository(db *sql.DB) orgprovider.Repository {
+//
+// Returns the concrete type, not the orgprovider.Repository interface: this
+// struct also implements services.SyncRunRecorder and services.SyncLocker's
+// sibling run-recording surface (see organization_sync_run_repository.go),
+// and callers that need to wire those up (main.go) need the concrete type to
+// see them. Assigning the result to an orgprovider.Repository-typed variable
+// still works exactly as before -- interface satisfaction does not depend on
+// a function's declared return type.
+func NewOrganizationProviderRepository(db *sql.DB) *OrganizationProviderRepository {
 	return &OrganizationProviderRepository{db: db}
 }
 
@@ -212,14 +221,94 @@ func (r *OrganizationProviderRepository) ApplySnapshot(ctx context.Context, in o
 		return nil, err
 	}
 
+	// Fold the durable success record into this SAME transaction, as the last
+	// statement before COMMIT. This is the one path where "fold into the
+	// transaction" is both correct and necessary: it is the only path that
+	// actually commits, so a crash right after must not leave a stale
+	// org_sync_runs row sitting next to real, committed deletions. Every
+	// other outcome (blocked, or a failure earlier in this function) relies
+	// on the deferred Rollback() above and is recorded by the caller via a
+	// SEPARATE transaction instead -- attaching a write to a transaction that
+	// is about to roll back would discard that write along with everything
+	// else, exactly the bug an earlier draft of this design had.
+	//
+	// If this write itself fails, the sync fails closed: return before
+	// Commit() so the deferred Rollback() discards the destructive writes
+	// too, rather than applying a change this repository could not durably
+	// record.
+	successReport := orgprovider.BuildMassDeletionReport(
+		currentUserCount, len(missingUserIDs), currentTeamCount, len(missingTeamIDs), in.MaxDeletePercent,
+	)
+	if err := recordSuccessAttempt(
+		ctx, tx, in, successReport,
+		len(in.Snapshot.Users), len(in.Snapshot.Teams), result.MassDeletionOverride != nil,
+	); err != nil {
+		return nil, fmt.Errorf("failed to record sync result: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit sync transaction: %w", err)
+		// Ambiguous, not a confirmed failure: Commit() erroring does not tell
+		// the client whether the server actually committed before the
+		// acknowledgment was lost. Wrapped distinctly so the caller records
+		// writes_status=unknown, never a confirmed rollback (none) and never
+		// a claimed success (applied). See ErrSyncCommitAmbiguous's doc.
+		return nil, errors.Join(orgprovider.ErrSyncCommitAmbiguous, fmt.Errorf("failed to commit sync transaction: %w", err))
 	}
 
 	result.UsersSynced = len(in.Snapshot.Users)
 	result.TeamsSynced = len(in.Snapshot.Teams)
 
 	return result, nil
+}
+
+// recordSuccessAttempt writes the org_sync_runs success row using the same
+// transaction as the destructive writes it describes, so both commit
+// atomically together or neither does. Called only on the success path --
+// see ApplyInput's doc on Trigger/InstanceID/StartedAt.
+func recordSuccessAttempt(
+	ctx context.Context, tx *sql.Tx, in orgprovider.ApplyInput,
+	report orgprovider.MassDeletionReport, usersSynced, teamsSynced int, overrideUsed bool,
+) error {
+	message := fmt.Sprintf(
+		"Synced %d users and %d teams. User deletions: %d (%.1f%%). Team deletions: %d (%.1f%%). Configured threshold: %.1f%%.",
+		usersSynced, teamsSynced,
+		report.Users.Deleting, report.Users.Percent,
+		report.Teams.Deleting, report.Teams.Percent,
+		report.Threshold,
+	)
+	_, err := tx.ExecContext(ctx, `
+		UPDATE org_sync_runs SET
+			last_trigger = $1,
+			last_status = 'success',
+			last_started_at = $2,
+			last_finished_at = $3,
+			last_instance_id = $4,
+			last_threshold_percent = $5,
+			last_users_existing = $6,
+			last_users_deleting = $7,
+			last_users_percent = $8,
+			last_teams_existing = $9,
+			last_teams_deleting = $10,
+			last_teams_percent = $11,
+			last_writes_status = 'applied',
+			last_override_used = $12,
+			last_users_synced = $13,
+			last_teams_synced = $14,
+			last_message = $15,
+			hold_active = false,
+			hold_recorded_at = NULL,
+			updated_at = NOW()
+		WHERE id = 1
+	`,
+		in.Trigger, in.StartedAt, time.Now().UTC(), in.InstanceID, in.MaxDeletePercent,
+		report.Users.Existing, report.Users.Deleting, report.Users.Percent,
+		report.Teams.Existing, report.Teams.Deleting, report.Teams.Percent,
+		overrideUsed, usersSynced, teamsSynced, message,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record sync attempt: %w", err)
+	}
+	return nil
 }
 
 // isProtectedUserRow/isProtectedTeamRow adapt orgprovider's protection rules

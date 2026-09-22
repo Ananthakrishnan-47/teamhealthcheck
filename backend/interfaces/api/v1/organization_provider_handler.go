@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"context"
 	"errors"
 	"io"
 	"math"
@@ -44,17 +45,23 @@ func NewOrganizationProviderHandler(
 
 // lockState reports the current threshold lock, tolerating a nil sync service
 // (which only happens in tests that exercise the settings endpoints alone).
-func (h *OrganizationProviderHandler) lockState() services.SyncLockState {
+//
+// An error here MUST be surfaced by the caller as a failure -- never treated
+// as "not locked". A claim read error producing a false "editable" response
+// would reopen exactly the cross-replica bypass the durable hold flag exists
+// to close.
+func (h *OrganizationProviderHandler) lockState(ctx context.Context) (services.SyncLockState, error) {
 	if h.syncService == nil {
-		return services.SyncLockState{}
+		return services.SyncLockState{}, nil
 	}
-	return h.syncService.LockState()
+	return h.syncService.LockState(ctx)
 }
 
 // thresholdResponse builds the settings body, including why the threshold is
 // frozen and at what value, so a tab that has just loaded knows to disable its
 // controls without a second request.
 func (h *OrganizationProviderHandler) thresholdResponse(
+	state services.SyncLockState,
 	saved *float64,
 	value float64,
 	source string,
@@ -67,7 +74,6 @@ func (h *OrganizationProviderHandler) thresholdResponse(
 		MaxPercent:       services.MaxConfigurableDeletePercent,
 	}
 
-	state := h.lockState()
 	body.Locked = state.Locked()
 	switch {
 	case state.Syncing:
@@ -110,7 +116,18 @@ func (h *OrganizationProviderHandler) GetDeletionThreshold(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, h.thresholdResponse(saved, value, source))
+	state, err := h.lockState(c.Request.Context())
+	if err != nil {
+		// Never a false "editable": a claim read error is reported as a
+		// failure, not silently treated as unlocked.
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to determine lock state",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, h.thresholdResponse(state, saved, value, source))
 }
 
 // UpdateDeletionThreshold handles
@@ -126,7 +143,15 @@ func (h *OrganizationProviderHandler) GetDeletionThreshold(c *gin.Context) {
 func (h *OrganizationProviderHandler) UpdateDeletionThreshold(c *gin.Context) {
 	// Checked before the body is even read, so a request from another tab is
 	// refused on the same grounds as one from this tab.
-	if state := h.lockState(); state.Locked() {
+	state, err := h.lockState(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to determine lock state",
+			Message: err.Error(),
+		})
+		return
+	}
+	if state.Locked() {
 		c.JSON(http.StatusConflict, dto.ErrorResponse{
 			Error:   "Deletion threshold is locked",
 			Message: thresholdLockMessage(state),
@@ -166,7 +191,15 @@ func (h *OrganizationProviderHandler) UpdateDeletionThreshold(c *gin.Context) {
 	// Re-checked after validation and immediately before the write: a sync that
 	// started while this request was being parsed must not have its threshold
 	// moved out from under it.
-	if state := h.lockState(); state.Locked() {
+	state, err = h.lockState(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to determine lock state",
+			Message: err.Error(),
+		})
+		return
+	}
+	if state.Locked() {
 		c.JSON(http.StatusConflict, dto.ErrorResponse{
 			Error:   "Deletion threshold is locked",
 			Message: thresholdLockMessage(state),
@@ -183,7 +216,7 @@ func (h *OrganizationProviderHandler) UpdateDeletionThreshold(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, h.thresholdResponse(&percent, percent, services.ThresholdSourceAdmin))
+	c.JSON(http.StatusOK, h.thresholdResponse(state, &percent, percent, services.ThresholdSourceAdmin))
 }
 
 // DismissMassDeletionHold handles
@@ -192,6 +225,10 @@ func (h *OrganizationProviderHandler) UpdateDeletionThreshold(c *gin.Context) {
 // It resolves a hold the administrator has decided not to override -- because
 // the provider data is what needs fixing -- and so unfreezes the threshold. It
 // applies nothing and deletes nothing: the held sync stays unapplied.
+//
+// Clears both the in-memory hold and the durable hold_active flag (via
+// ClearHold), so the escape hatch works even on a replica whose in-memory
+// hold was never set because another replica ran the held sync.
 func (h *OrganizationProviderHandler) DismissMassDeletionHold(c *gin.Context) {
 	if h.syncService == nil {
 		c.JSON(http.StatusBadRequest, dto.ErrorResponse{
@@ -202,7 +239,15 @@ func (h *OrganizationProviderHandler) DismissMassDeletionHold(c *gin.Context) {
 	}
 
 	// A hold cannot be dismissed out from under a running sync.
-	if h.syncService.LockState().Syncing {
+	state, err := h.syncService.LockState(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to determine lock state",
+			Message: err.Error(),
+		})
+		return
+	}
+	if state.Syncing {
 		c.JSON(http.StatusConflict, dto.ErrorResponse{
 			Error:   "A synchronization is already running",
 			Message: "Wait for the running synchronization to finish, then try again.",
@@ -211,7 +256,13 @@ func (h *OrganizationProviderHandler) DismissMassDeletionHold(c *gin.Context) {
 		return
 	}
 
-	h.syncService.DismissHold()
+	if err := h.syncService.ClearHold(c.Request.Context()); err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to clear the mass-deletion hold",
+			Message: err.Error(),
+		})
+		return
+	}
 
 	saved, err := h.settingsRepo.GetOrgSyncMaxDeletePercent(c.Request.Context())
 	if err != nil {
@@ -230,7 +281,19 @@ func (h *OrganizationProviderHandler) DismissMassDeletionHold(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, h.thresholdResponse(saved, value, source))
+	// Re-fetched, not reused: the state captured above predates ClearHold and
+	// would still report Held -- the response must reflect the just-cleared
+	// state, not the one that justified clearing it.
+	freshState, err := h.lockState(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to determine lock state",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, h.thresholdResponse(freshState, saved, value, source))
 }
 
 // thresholdLockMessage explains a refusal in the terms the admin is looking at.
@@ -351,9 +414,17 @@ func isAdminRequest(c *gin.Context) bool {
 func mapSyncError(err error) (int, any) {
 	switch {
 	case errors.Is(err, services.ErrSyncInProgress):
+		// The trigger-aware message names what is actually running when
+		// known ("an automatic scheduled sync"), degrading to the vaguer "a
+		// synchronization" when it cannot be determined -- never guessed.
+		message := "Another synchronization is already in progress. Wait for it to finish, then try again."
+		var inProgress *services.SyncInProgressError
+		if errors.As(err, &inProgress) {
+			message = "Cannot start a manual sync because " + inProgress.Error() + ". Wait for it to finish, then try again."
+		}
 		return http.StatusConflict, dto.ErrorResponse{
 			Error:   "A synchronization is already running",
-			Message: "Another synchronization is already in progress. Wait for it to finish, then try again.",
+			Message: message,
 		}
 
 	case errors.Is(err, services.ErrProviderNotConfigured):
@@ -379,6 +450,17 @@ func mapSyncError(err error) (int, any) {
 		return http.StatusBadGateway, dto.ErrorResponse{
 			Error:   "Failed to reach the organization data provider",
 			Message: err.Error(),
+		}
+
+	case errors.Is(err, orgprovider.ErrSyncCommitAmbiguous):
+		// Distinct from the default branch deliberately: this is the one
+		// outcome the sync cannot confirm either way (the write may have
+		// committed on the server with the acknowledgment lost), so the
+		// message says so explicitly rather than reading as an ordinary
+		// failure an admin might assume changed nothing.
+		return http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Synchronization outcome could not be confirmed",
+			Message: "The database did not confirm whether this sync's changes were saved. Verify the current user and team counts directly before re-running the sync.",
 		}
 
 	case errors.Is(err, orgprovider.ErrMassDeletionBlocked):
