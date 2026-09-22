@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/XSAM/otelsql"
 	"github.com/agopalakrishnan/teams360/backend/application/services"
@@ -31,7 +32,15 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
+	// Cancellable so shutdown can signal every long-running background
+	// component (Phase 2's scheduler consumes ctx.Done(); nothing else does
+	// yet). cancel() fires inline in the shutdown sequence below, NOT via
+	// defer -- it must run before main() returns, not as part of the
+	// LIFO-ordered deferred cleanup, since some of that cleanup (telemetry
+	// shutdown) must NOT see an already-cancelled context. See the telemetry
+	// shutdown block below for why it deliberately uses its own context
+	// instead of this one.
+	ctx, cancel := context.WithCancel(context.Background())
 
 	// Initialize logger
 	logLevel := os.Getenv("LOG_LEVEL")
@@ -54,7 +63,15 @@ func main() {
 		log.WithError(err).Warn("failed to initialize telemetry, continuing without it")
 	} else {
 		defer func() {
-			if err := shutdownTelemetry(ctx); err != nil {
+			// A bug the cancellable root context introduces, fixed here: this
+			// defer runs when main() returns, which is AFTER cancel() has
+			// already fired inline in the shutdown sequence below. Passing
+			// the (by then cancelled) root ctx would drop the final span
+			// flush. Use a fresh, short-lived context instead, detached from
+			// shutdown entirely.
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			if err := shutdownTelemetry(shutdownCtx); err != nil {
 				log.WithError(err).Warn("error shutting down telemetry")
 			}
 		}()
@@ -208,8 +225,28 @@ func main() {
 	}
 	// orgRepo also serves the admin-configured mass-deletion threshold; without
 	// it the guard would silently fall back to the environment variable.
+	//
+	// orgSyncLocker is the cross-replica mutual-exclusion primitive: without
+	// it, only the in-process admission flag guards concurrent syncs, which
+	// is safe for a single replica but NOT for more than one -- and nothing
+	// in this deployment's topology actually guarantees a single replica
+	// (see kubevela/teams360-kubevela.yaml's inert override policy). orgRepo
+	// doubles as the SyncRunRecorder: both interfaces are satisfied by the
+	// same concrete *postgres.OrganizationProviderRepository.
+	orgSyncLocker := postgres.NewOrgSyncLocker(db)
 	orgSyncService := services.NewOrganizationSyncService(orgProviderRepo, dataProviderFetcher, userRepo, teamRepo,
-		services.WithDeleteThresholdStore(orgRepo))
+		services.WithDeleteThresholdStore(orgRepo),
+		services.WithSyncLocker(orgSyncLocker),
+		services.WithSyncRunRecorder(orgProviderRepo),
+	)
+	// A configured-but-unprotected sync service is the exact failure mode the
+	// distributed lock exists to prevent, and WithSyncLocker being an
+	// optional, nil-tolerant functional option (correct for unit tests) means
+	// omitting it here would produce no error, no warning, nothing -- just a
+	// silently unprotected deployment. Fail loudly at boot instead.
+	if orgSyncService.Configured() && !orgSyncService.HasSyncLocker() {
+		log.Fatal("organization sync is configured but has no distributed locker; refusing to start unprotected across replicas")
+	}
 
 	// Initialize router (use gin.New() instead of gin.Default() to disable default logger)
 	router := gin.New()
@@ -349,6 +386,14 @@ func main() {
 	// Wait for interrupt signal
 	<-quit
 	log.Info("shutting down server gracefully...")
+
+	// Fires inline, not deferred, so it runs before main() returns rather than
+	// racing the LIFO-ordered deferred cleanup. Nothing consumes ctx.Done()
+	// yet in this phase -- the telemetry shutdown above deliberately uses its
+	// own separate context instead, precisely so it is unaffected by this
+	// cancellation either way. This is plumbing for Phase 2's scheduler,
+	// which will stop against this same ctx.Done().
+	cancel()
 }
 
 func directoryRedirectPath(urlPath string, isDir bool) (string, bool) {
