@@ -405,8 +405,8 @@ func TestSchedulerBlockedNeverConsultsTheDurableHold(t *testing.T) {
 	// though the durable flag says held -- otherwise a restart-surviving hold
 	// would block the scheduler, contradicting the decision that a restart
 	// permits a harmless re-attempt.
-	if service.SchedulerBlocked() {
-		t.Fatal("SchedulerBlocked must never be true from the durable hold alone")
+	if blocked, reason := service.SchedulerBlocked(); blocked {
+		t.Fatalf("SchedulerBlocked must never be true from the durable hold alone, got reason %q", reason)
 	}
 
 	// LockState, by contrast, MUST see the durable hold -- this is the
