@@ -369,28 +369,45 @@ func (s *OrganizationSyncService) Sync(ctx context.Context) (*SyncResult, error)
 }
 
 // SchedulerBlocked reports whether a scheduled occurrence should be skipped
-// rather than attempted: a sync already running on THIS replica, or an
-// unresolved IN-MEMORY hold. Deliberately reads only in-memory state, never
-// the durable hold_active flag consulted by LockState -- after a restart or
-// TTL expiry, the in-memory hold is gone and a re-attempt is safe (an
-// over-threshold run writes nothing), and this method is how the scheduler
-// gets to see that. This separation is structural: the Syncer interface the
-// scheduler package depends on exposes SchedulerBlocked, never LockState, so
-// the scheduler has no path to the durable flag at all.
-func (s *OrganizationSyncService) SchedulerBlocked() bool {
+// rather than attempted, and why: a sync already running on THIS replica
+// (named by trigger), or an unresolved IN-MEMORY hold. Deliberately reads
+// only in-memory state, never the durable hold_active flag consulted by
+// LockState -- after a restart or TTL expiry, the in-memory hold is gone and
+// a re-attempt is safe (an over-threshold run writes nothing), and this
+// method is how the scheduler gets to see that. This separation is
+// structural: the Syncer interface the scheduler package depends on exposes
+// SchedulerBlocked, never LockState, so the scheduler has no path to the
+// durable flag at all.
+//
+// The reason returned is one of orgprovider.SkipManualRunning,
+// SkipScheduledRunning, or SkipHoldUnresolved; "" when not blocked.
+func (s *OrganizationSyncService) SchedulerBlocked() (bool, string) {
 	if s.running.Load() {
-		return true
+		if trigger, _ := s.runningTrigger.Load().(string); trigger == orgprovider.TriggerScheduled {
+			return true, orgprovider.SkipScheduledRunning
+		}
+		return true, orgprovider.SkipManualRunning
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.held == nil {
-		return false
+		return false, ""
 	}
 	if time.Since(s.held.heldAt) > MassDeletionHoldTTL {
 		s.held = nil
-		return false
+		return false, ""
 	}
-	return true
+	return true, orgprovider.SkipHoldUnresolved
+}
+
+// RecordSkip best-effort persists that a scheduled occurrence was skipped
+// rather than attempted. A nil SyncRunRecorder makes this a no-op, matching
+// every other best-effort recording method.
+func (s *OrganizationSyncService) RecordSkip(ctx context.Context, reason string) error {
+	if s.runs == nil {
+		return nil
+	}
+	return s.runs.RecordOrgSyncSkip(ctx, orgprovider.OrgSyncSkip{Reason: reason, At: time.Now().UTC()})
 }
 
 // SyncWithOptions fetches, validates and applies a snapshot.
@@ -824,6 +841,16 @@ func (s *OrganizationSyncService) ClearHold(ctx context.Context) error {
 		return fmt.Errorf("failed to clear organization sync hold: %w", err)
 	}
 	return nil
+}
+
+// GetLastRun reads the persisted last-attempt/last-skip state for API/UI
+// display. Returns an empty (never-run) result, not an error, when no
+// SyncRunRecorder is configured.
+func (s *OrganizationSyncService) GetLastRun(ctx context.Context) (*orgprovider.OrgSyncLastRun, error) {
+	if s.runs == nil {
+		return &orgprovider.OrgSyncLastRun{}, nil
+	}
+	return s.runs.GetOrgSyncLastRun(ctx)
 }
 
 // recordHold remembers a tripped guard, together with the threshold it was
