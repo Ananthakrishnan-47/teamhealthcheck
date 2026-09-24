@@ -7,7 +7,9 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/agopalakrishnan/teams360/backend/application/scheduler"
 	"github.com/agopalakrishnan/teams360/backend/application/services"
 	"github.com/agopalakrishnan/teams360/backend/domain/organization"
 	"github.com/agopalakrishnan/teams360/backend/domain/orgprovider"
@@ -24,22 +26,34 @@ import (
 // in OrganizationSyncService and OrganizationProviderRepository respectively.
 type OrganizationProviderHandler struct {
 	syncService *services.OrganizationSyncService
-	// settingsRepo persists the admin-configured mass-deletion threshold.
-	// The threshold endpoints live here, next to the sync, because whether
-	// they may run at all depends on the sync's own state.
+	// settingsRepo persists the admin-configured mass-deletion threshold and
+	// the automatic-sync schedule. The threshold endpoints live here because
+	// whether the threshold may be changed depends on the sync's own
+	// running/held state (see lockState below). The schedule endpoints live
+	// here too, for proximity to the sync they configure, but are NOT
+	// lock-gated: changing whether/when a sync runs automatically does not
+	// bypass the mass-deletion guard the way raising the threshold would.
 	settingsRepo organization.Repository
 	providerName string
+	// scheduleLoc is the IANA location every scheduled occurrence is computed
+	// in (ORG_SYNC_SCHEDULE_TZ in main.go, default UTC). Used only when an
+	// admin enables or re-enables the schedule -- the scheduler itself
+	// receives the same value directly, not through this handler.
+	scheduleLoc *time.Location
 }
 
-// NewOrganizationProviderHandler creates the handler.
+// NewOrganizationProviderHandler creates the handler. scheduleLoc must not be
+// nil -- pass time.UTC explicitly where no other zone applies.
 func NewOrganizationProviderHandler(
 	syncService *services.OrganizationSyncService,
 	settingsRepo organization.Repository,
+	scheduleLoc *time.Location,
 ) *OrganizationProviderHandler {
 	return &OrganizationProviderHandler{
 		syncService:  syncService,
 		settingsRepo: settingsRepo,
 		providerName: "data-provider",
+		scheduleLoc:  scheduleLoc,
 	}
 }
 
@@ -318,6 +332,175 @@ func (h *OrganizationProviderHandler) GetSettings(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, settings)
+}
+
+// GetOrgSyncSchedule handles
+// GET /api/v1/admin/settings/organization-provider/schedule.
+func (h *OrganizationProviderHandler) GetOrgSyncSchedule(c *gin.Context) {
+	schedule, err := h.settingsRepo.GetOrgSyncSchedule(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to fetch organization sync schedule",
+			Message: err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, orgSyncScheduleResponse(schedule))
+}
+
+// UpdateOrgSyncSchedule handles
+// PUT /api/v1/admin/settings/organization-provider/schedule.
+//
+// Enabling initializes or recomputes nextRunAt from now -- it never advances
+// an already-scheduled occurrence, which is the scheduler's atomic claim's
+// job alone (see application/scheduler). Disabling preserves the saved
+// frequency (so re-enabling remembers the admin's last choice, matching
+// Weekly-as-default applying only on the very first enable) but clears
+// nextRunAt, so a disabled schedule never shows a stale next-run date and
+// re-enabling always recomputes fresh.
+func (h *OrganizationProviderHandler) UpdateOrgSyncSchedule(c *gin.Context) {
+	var req dto.UpdateOrgSyncScheduleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "Invalid request body",
+			Message: err.Error(),
+		})
+		return
+	}
+	if req.Enabled == nil {
+		c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "enabled is required",
+			Message: "Provide enabled as true or false",
+		})
+		return
+	}
+
+	current, err := h.settingsRepo.GetOrgSyncSchedule(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to fetch organization sync schedule",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if !*req.Enabled {
+		if err := h.settingsRepo.UpdateOrgSyncSchedule(c.Request.Context(), false, current.Frequency, nil); err != nil {
+			c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+				Error:   "Failed to save organization sync schedule",
+				Message: err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusOK, orgSyncScheduleResponse(&organization.OrgSyncSchedule{Enabled: false, Frequency: current.Frequency}))
+		return
+	}
+
+	// Weekly-as-default applies only on the very first enable (no frequency
+	// saved yet); a later re-enable with no frequency in the request reuses
+	// whatever was preserved from the last disable.
+	frequency := current.Frequency
+	if req.Frequency != nil && *req.Frequency != "" {
+		frequency = *req.Frequency
+	}
+	if frequency == "" {
+		frequency = organization.OrgSyncFrequencyWeekly
+	}
+	if !scheduler.ValidFrequency(frequency) {
+		c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "frequency must be one of: daily, weekly, monthly",
+			Message: "Provide frequency as one of: daily, weekly, monthly",
+		})
+		return
+	}
+
+	nextRunAt := scheduler.NextOccurrence(frequency, time.Now().UTC(), h.scheduleLoc)
+	if err := h.settingsRepo.UpdateOrgSyncSchedule(c.Request.Context(), true, frequency, &nextRunAt); err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to save organization sync schedule",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, orgSyncScheduleResponse(&organization.OrgSyncSchedule{Enabled: true, Frequency: frequency, NextRunAt: &nextRunAt}))
+}
+
+// orgSyncScheduleResponse builds the schedule settings body, including the
+// fixed set of choices the UI presents -- never raw cron syntax -- so a tab
+// that has just loaded can render its picker without a second request.
+func orgSyncScheduleResponse(schedule *organization.OrgSyncSchedule) dto.OrgSyncScheduleDTO {
+	resp := dto.OrgSyncScheduleDTO{
+		Enabled:   schedule.Enabled,
+		Frequency: schedule.Frequency,
+		AvailableFrequencies: []string{
+			organization.OrgSyncFrequencyDaily,
+			organization.OrgSyncFrequencyWeekly,
+			organization.OrgSyncFrequencyMonthly,
+		},
+		DefaultFrequency: organization.OrgSyncFrequencyWeekly,
+	}
+	if schedule.NextRunAt != nil {
+		formatted := schedule.NextRunAt.UTC().Format(time.RFC3339)
+		resp.NextRunAt = &formatted
+	}
+	return resp
+}
+
+// GetOrgSyncLastRun handles
+// GET /api/v1/admin/organization-provider/sync/last-run.
+//
+// Reports the persisted result of the most recent attempt that actually ran,
+// separately from the most recent skip, so a skip can never mask the last
+// actionable result -- see orgprovider.OrgSyncLastRun's doc.
+func (h *OrganizationProviderHandler) GetOrgSyncLastRun(c *gin.Context) {
+	if h.syncService == nil {
+		c.JSON(http.StatusOK, dto.OrgSyncLastRunDTO{})
+		return
+	}
+	last, err := h.syncService.GetLastRun(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to fetch the last organization sync result",
+			Message: err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, orgSyncLastRunResponse(last))
+}
+
+func orgSyncLastRunResponse(last *orgprovider.OrgSyncLastRun) dto.OrgSyncLastRunDTO {
+	var resp dto.OrgSyncLastRunDTO
+	if last == nil {
+		return resp
+	}
+	if a := last.LastAttempt; a != nil {
+		resp.LastAttempt = &dto.OrgSyncAttemptDTO{
+			Trigger:          a.Trigger,
+			Status:           a.Status,
+			StartedAt:        a.StartedAt.UTC().Format(time.RFC3339),
+			FinishedAt:       a.FinishedAt.UTC().Format(time.RFC3339),
+			ThresholdPercent: a.ThresholdPercent,
+			UsersExisting:    a.UsersExisting,
+			UsersDeleting:    a.UsersDeleting,
+			UsersPercent:     a.UsersPercent,
+			TeamsExisting:    a.TeamsExisting,
+			TeamsDeleting:    a.TeamsDeleting,
+			TeamsPercent:     a.TeamsPercent,
+			WritesStatus:     a.WritesStatus,
+			OverrideUsed:     a.OverrideUsed,
+			UsersSynced:      a.UsersSynced,
+			TeamsSynced:      a.TeamsSynced,
+			Message:          a.Message,
+		}
+	}
+	if sk := last.LastSkip; sk != nil {
+		resp.LastSkip = &dto.OrgSyncSkipDTO{
+			Reason: sk.Reason,
+			At:     sk.At.UTC().Format(time.RFC3339),
+		}
+	}
+	return resp
 }
 
 // Sync handles POST /api/v1/admin/organization-provider/sync.
