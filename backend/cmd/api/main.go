@@ -227,27 +227,21 @@ func main() {
 	// orgRepo also serves the admin-configured mass-deletion threshold; without
 	// it the guard would silently fall back to the environment variable.
 	//
-	// orgSyncLocker is the cross-replica mutual-exclusion primitive: without
-	// it, only the in-process admission flag guards concurrent syncs, which
-	// is safe for a single replica but NOT for more than one -- and nothing
-	// in this deployment's topology actually guarantees a single replica
-	// (see kubevela/teams360-kubevela.yaml's inert override policy). orgRepo
+	// This deployment is single-instance only: no distributed (cross-replica)
+	// locker is wired here. The in-process admission flag inside
+	// OrganizationSyncService (its `running` field) is the only, sufficient
+	// guard for one process -- it already serializes manual and scheduled
+	// syncs against each other and against themselves. If this service is
+	// ever deployed with more than one replica against the same database,
+	// re-introduce a SyncLocker (see application/services/organization_sync_locker.go
+	// and infrastructure/persistence/postgres/organization_sync_locker.go,
+	// both left in place for exactly that) via WithSyncLocker below. orgRepo
 	// doubles as the SyncRunRecorder: both interfaces are satisfied by the
 	// same concrete *postgres.OrganizationProviderRepository.
-	orgSyncLocker := postgres.NewOrgSyncLocker(db)
 	orgSyncService := services.NewOrganizationSyncService(orgProviderRepo, dataProviderFetcher, userRepo, teamRepo,
 		services.WithDeleteThresholdStore(orgRepo),
-		services.WithSyncLocker(orgSyncLocker),
 		services.WithSyncRunRecorder(orgProviderRepo),
 	)
-	// A configured-but-unprotected sync service is the exact failure mode the
-	// distributed lock exists to prevent, and WithSyncLocker being an
-	// optional, nil-tolerant functional option (correct for unit tests) means
-	// omitting it here would produce no error, no warning, nothing -- just a
-	// silently unprotected deployment. Fail loudly at boot instead.
-	if orgSyncService.Configured() && !orgSyncService.HasSyncLocker() {
-		log.Fatal("organization sync is configured but has no distributed locker; refusing to start unprotected across replicas")
-	}
 
 	// ORG_SYNC_SCHEDULE_TZ: the IANA location every scheduled occurrence is
 	// computed in. Explicit loading rather than the ambient container

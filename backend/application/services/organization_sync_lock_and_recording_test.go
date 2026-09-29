@@ -481,3 +481,241 @@ func (f failingFetcher) FetchSnapshot(_ context.Context) (*orgsnapshot.Snapshot,
 }
 
 func timePtr(t time.Time) *time.Time { return &t }
+
+// --- Single-instance (no distributed locker) coverage -----------------------
+//
+// These tests pin the current deployment shape: no SyncLocker is wired
+// anywhere in this package's helpers unless a test explicitly opts in (as the
+// locker-specific tests above already do), so every test below exercises the
+// nil-locker path that main.go now uses. The in-process `running` flag is the
+// only admission gate under test here.
+
+// TestManualSyncSucceedsWithNoLockerConfigured pins the happy path for a
+// manual sync with no distributed locker wired at all -- the deployment shape
+// after removing the Postgres advisory lock from main.go. Success-attempt
+// recording happens inside the real repository's own ApplySnapshot
+// transaction (see recordSuccessAttempt's doc), not in this service, so the
+// fake recordingRepo used here never touches the recorder -- this test's
+// scope is "no locker means no error", not attempt persistence.
+func TestManualSyncSucceedsWithNoLockerConfigured(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	service := services.NewOrganizationSyncService(&recordingRepo{}, thresholdFetcher{}, nil, nil)
+
+	if _, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerManual}); err != nil {
+		t.Fatalf("a manual sync with no locker configured must succeed, got %v", err)
+	}
+}
+
+// TestScheduledSyncSucceedsWithNoLockerConfigured mirrors the manual-trigger
+// test above for a scheduled trigger -- both triggers funnel through the same
+// SyncWithOptions, so both must behave identically with no locker wired.
+func TestScheduledSyncSucceedsWithNoLockerConfigured(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	service := services.NewOrganizationSyncService(&recordingRepo{}, thresholdFetcher{}, nil, nil)
+
+	if _, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerScheduled}); err != nil {
+		t.Fatalf("a scheduled sync with no locker configured must succeed, got %v", err)
+	}
+}
+
+// TestSyncSucceedsWhenLockerExplicitlyNil is the direct counterpart to
+// TestConfiguredLockerErrorFailsSyncClosed above: a locker option passed nil
+// (as opposed to never called) must still be treated as "no distributed
+// locking configured", never dereferenced, and HasSyncLocker must agree.
+func TestSyncSucceedsWhenLockerExplicitlyNil(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	service := services.NewOrganizationSyncService(&recordingRepo{}, thresholdFetcher{}, nil, nil,
+		services.WithSyncLocker(nil))
+
+	if service.HasSyncLocker() {
+		t.Fatal("HasSyncLocker must report false when the locker option was passed nil")
+	}
+	if _, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerManual}); err != nil {
+		t.Fatalf("a nil locker must be safely skipped, not cause an error: %v", err)
+	}
+}
+
+// TestConcurrentManualSyncAttemptsExactlyOneWins is
+// TestLocalConcurrentSyncNamesTheRunningTrigger's manual/manual counterpart:
+// that test proves manual cannot overlap scheduled; this proves two manual
+// requests cannot overlap each other either, using the same gated-repo
+// pattern to guarantee the first attempt is genuinely still running.
+func TestConcurrentManualSyncAttemptsExactlyOneWins(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	repo := &gatedRepo{gate: make(chan struct{}), started: make(chan struct{}, 1)}
+	service := services.NewOrganizationSyncService(repo, thresholdFetcher{}, nil, nil)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerManual})
+		firstDone <- err
+	}()
+
+	select {
+	case <-repo.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first manual sync never reached ApplySnapshot")
+	}
+
+	_, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerManual})
+	var inProgress *services.SyncInProgressError
+	if !errors.As(err, &inProgress) {
+		t.Fatalf("expected the second concurrent manual sync to be refused with *SyncInProgressError, got %v", err)
+	}
+	if inProgress.Trigger != orgprovider.TriggerManual {
+		t.Fatalf("expected the conflict to name manual (the actually running trigger), got %q", inProgress.Trigger)
+	}
+
+	close(repo.gate)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("the first (gated) manual sync should have completed cleanly, got %v", err)
+	}
+}
+
+// TestConcurrentScheduledSyncAttemptsExactlyOneWins completes the pairwise
+// coverage: manual/manual and manual/scheduled are both proven above; this
+// covers scheduled/scheduled, e.g. a slow-running scheduled sync still
+// in-flight when the scheduler's next tick fires.
+func TestConcurrentScheduledSyncAttemptsExactlyOneWins(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	repo := &gatedRepo{gate: make(chan struct{}), started: make(chan struct{}, 1)}
+	service := services.NewOrganizationSyncService(repo, thresholdFetcher{}, nil, nil)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerScheduled})
+		firstDone <- err
+	}()
+
+	select {
+	case <-repo.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first scheduled sync never reached ApplySnapshot")
+	}
+
+	_, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerScheduled})
+	var inProgress *services.SyncInProgressError
+	if !errors.As(err, &inProgress) {
+		t.Fatalf("expected the second concurrent scheduled sync to be refused with *SyncInProgressError, got %v", err)
+	}
+	if inProgress.Trigger != orgprovider.TriggerScheduled {
+		t.Fatalf("expected the conflict to name scheduled (the actually running trigger), got %q", inProgress.Trigger)
+	}
+
+	close(repo.gate)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("the first (gated) scheduled sync should have completed cleanly, got %v", err)
+	}
+}
+
+// toggleFetcher fails on a chosen call number and returns a valid snapshot on
+// every other call, letting a test drive "sync fails, then a later sync
+// succeeds" without needing two separate service instances (which would each
+// have their own, uninformative `running` flag).
+type toggleFetcher struct {
+	mu      sync.Mutex
+	calls   int
+	failOn  int // 1-indexed call number to fail; 0 means never fail
+	failErr error
+	ok      *orgsnapshot.Snapshot
+}
+
+func (f *toggleFetcher) FetchSnapshot(_ context.Context) (*orgsnapshot.Snapshot, error) {
+	f.mu.Lock()
+	f.calls++
+	n := f.calls
+	f.mu.Unlock()
+	if f.failOn != 0 && n == f.failOn {
+		return nil, f.failErr
+	}
+	return f.ok, nil
+}
+
+// TestSyncSucceedsAfterAPriorSyncFailed proves the running flag (and its
+// paired runningTrigger) are reset on the FAILURE path, not only on success --
+// a sync that fails must never permanently wedge every future sync.
+func TestSyncSucceedsAfterAPriorSyncFailed(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	ok, err := thresholdFetcher{}.FetchSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error building the baseline snapshot: %v", err)
+	}
+	fetcher := &toggleFetcher{failOn: 1, failErr: errors.New("provider unreachable"), ok: ok}
+	service := services.NewOrganizationSyncService(&recordingRepo{}, fetcher, nil, nil)
+
+	if _, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerManual}); err == nil {
+		t.Fatal("expected the first sync to fail")
+	}
+
+	if _, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerScheduled}); err != nil {
+		t.Fatalf("expected a later sync to run and succeed after the earlier one failed, got %v", err)
+	}
+}
+
+// TestSyncSucceedsAfterAPriorSyncSucceeded is the success/success companion:
+// the running flag must reset after a clean completion too, so the schedule's
+// next occurrence (or another manual click) is never refused by a stale flag.
+func TestSyncSucceedsAfterAPriorSyncSucceeded(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	service := services.NewOrganizationSyncService(&recordingRepo{}, thresholdFetcher{}, nil, nil)
+
+	if _, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerManual}); err != nil {
+		t.Fatalf("unexpected error on the first sync: %v", err)
+	}
+	if _, err := service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerScheduled}); err != nil {
+		t.Fatalf("expected a later sync to run after an earlier one succeeded, got %v", err)
+	}
+}
+
+// panicRepo panics inside ApplySnapshot, signalling on started first so a
+// test can confirm it was actually reached (as opposed to being refused by
+// the running flag before ever getting there).
+type panicRepo struct {
+	started chan struct{}
+}
+
+func (r *panicRepo) KnownHierarchyLevelIDs(_ context.Context) (map[string]bool, error) {
+	return knownLevels(), nil
+}
+
+func (r *panicRepo) ApplySnapshot(_ context.Context, _ orgprovider.ApplyInput) (*orgprovider.ApplyResult, error) {
+	select {
+	case r.started <- struct{}{}:
+	default:
+	}
+	panic("simulated panic during ApplySnapshot")
+}
+
+// TestPanicDuringSyncStillReleasesRunningFlag proves the running flag's
+// release is a defer set up immediately after it is won (before any of the
+// fetch/validate/apply work that could panic), so a panic mid-sync still
+// releases it -- otherwise a single panicking sync would permanently refuse
+// every manual and scheduled sync after it, with no way to recover short of a
+// process restart.
+func TestPanicDuringSyncStillReleasesRunningFlag(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	repo := &panicRepo{started: make(chan struct{}, 2)}
+	service := services.NewOrganizationSyncService(repo, thresholdFetcher{}, nil, nil)
+
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerManual})
+	}()
+
+	select {
+	case <-repo.started:
+	default:
+		t.Fatal("expected the first (panicking) sync to have reached ApplySnapshot")
+	}
+
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = service.SyncWithOptions(context.Background(), services.SyncOptions{Trigger: orgprovider.TriggerScheduled})
+	}()
+
+	select {
+	case <-repo.started:
+	default:
+		t.Fatal("expected the second sync to reach ApplySnapshot too -- the running flag must be released after a panic, not left stuck true")
+	}
+}
