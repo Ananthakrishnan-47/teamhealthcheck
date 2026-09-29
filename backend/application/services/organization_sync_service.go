@@ -352,11 +352,10 @@ func (s *OrganizationSyncService) Configured() bool {
 	return s.fetcher != nil
 }
 
-// HasSyncLocker reports whether distributed locking is configured. main.go
-// uses this at startup to fail loudly if a configured (Configured()) service
-// was wired without one -- see the pre-implementation verification checklist:
-// a service that can run but has no locker silently loses the entire
-// cross-replica safety story, with no error anywhere.
+// HasSyncLocker reports whether distributed locking is configured. Not
+// consulted by main.go in the current single-instance deployment (see
+// WithSyncLocker's doc); kept for tests and for any future caller that
+// re-introduces a cross-replica locker and wants to assert it is wired.
 func (s *OrganizationSyncService) HasSyncLocker() bool {
 	return s.locker != nil
 }
