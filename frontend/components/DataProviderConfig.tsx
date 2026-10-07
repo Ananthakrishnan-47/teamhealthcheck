@@ -320,7 +320,7 @@ export default function DataProviderConfig() {
         >
           <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
           <div>
-            <p className="text-sm font-medium text-red-900">Couldn't load provider settings</p>
+            <p className="text-sm font-medium text-red-900">Couldn&apos;t load provider settings</p>
             <p className="text-sm text-red-700 mt-1">{settingsLoadError}</p>
             <button
               onClick={loadSettings}
@@ -384,7 +384,7 @@ export default function DataProviderConfig() {
               )}
             </ul>
             <p className="text-xs text-red-700 mt-2" data-testid="sync-hold-threshold">
-              "Existing" counts only the users/teams the provider is allowed to manage &mdash; it
+              &quot;Existing&quot; counts only the users/teams the provider is allowed to manage &mdash; it
               excludes the permanent admin and the fixed demo/E2E accounts and teams, which can
               never be deleted by a sync. Configured threshold: {formatPercent(hold.threshold)}.
             </p>

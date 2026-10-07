@@ -79,6 +79,13 @@ func (r *OrganizationProviderRepository) ApplySnapshot(ctx context.Context, in o
 	for _, id := range in.PreservedMemberUserIDs {
 		deletionExemptUserIDs[id] = true
 	}
+	supervisorExemptUserIDs, err := protectedTeamSupervisorUserIDs(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to evaluate protected supervisor chains: %w", err)
+	}
+	for id := range supervisorExemptUserIDs {
+		deletionExemptUserIDs[id] = true
+	}
 	snapshotTeamIDs := make(map[string]bool, len(in.Snapshot.Teams))
 	for _, t := range in.Snapshot.Teams {
 		snapshotTeamIDs[t.ID] = true
@@ -581,4 +588,35 @@ func deleteMissingUsers(ctx context.Context, tx *sql.Tx, missingUserIDs []string
 		result.ActionItemsDeleted += actionItemCount
 	}
 	return nil
+}
+
+// protectedTeamSupervisorUserIDs returns every user currently named in a
+// protected team's stored supervisor chain (team_supervisors). A sync must
+// never delete one of these users: team_supervisors.user_id cascades on
+// delete (migrations/000005) with no exception for protected teams, so
+// deleting a merely-unprotected user who happens to sit in a protected team's
+// chain would silently wipe that row even though the team itself is never
+// touched by a sync. Callers fold this set into deletionExemptUserIDs so such
+// a user is treated as "present" regardless of what the provider reports.
+func protectedTeamSupervisorUserIDs(ctx context.Context, tx *sql.Tx) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT team_id, user_id FROM team_supervisors`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read team supervisors: %w", err)
+	}
+	defer rows.Close()
+
+	exempt := make(map[string]bool)
+	for rows.Next() {
+		var teamID, userID string
+		if err := rows.Scan(&teamID, &userID); err != nil {
+			return nil, fmt.Errorf("failed to scan team supervisor row: %w", err)
+		}
+		if orgprovider.IsProtectedTeam(teamID) {
+			exempt[userID] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read team supervisors: %w", err)
+	}
+	return exempt, nil
 }
