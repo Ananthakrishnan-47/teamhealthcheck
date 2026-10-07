@@ -13,6 +13,23 @@ func ValidDueDate(s *string) bool {
 	return err == nil
 }
 
+// ValidActionItemStatuses enumerates every status an action item can hold.
+var ValidActionItemStatuses = map[string]bool{
+	"open":        true,
+	"on_hold":     true,
+	"in_progress": true,
+	"done":        true,
+}
+
+// AllowedActionItemTransitions maps a current status to the set of statuses
+// it may transition into. Transitions not present here are rejected.
+var AllowedActionItemTransitions = map[string]map[string]bool{
+	"open":        {"in_progress": true},
+	"in_progress": {"on_hold": true, "done": true},
+	"on_hold":     {"in_progress": true},
+	"done":        {},
+}
+
 // CreateActionItemRequest is the request body for POST /api/v1/teams/:teamId/action-items
 type CreateActionItemRequest struct {
 	DimensionID      *string `json:"dimensionId"`
@@ -51,6 +68,12 @@ type ActionItemResponse struct {
 	AssessmentPeriod *string `json:"assessmentPeriod"`
 	CreatedAt        string  `json:"createdAt"`
 	UpdatedAt        string  `json:"updatedAt"`
+}
+
+// DirectManagerResponse is returned by GET /api/v1/teams/:teamId/action-items/direct-manager
+type DirectManagerResponse struct {
+	ID   *string `json:"id"`
+	Name *string `json:"name"`
 }
 
 // ActionItemsResponse wraps a list of action items

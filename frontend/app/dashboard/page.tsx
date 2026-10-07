@@ -1472,6 +1472,7 @@ export default function DashboardPage() {
                       }
                       teamMembers={teamMembers}
                       canEdit={true}
+                      currentUserId={user.id}
                     />
                   </div>
                 )}
