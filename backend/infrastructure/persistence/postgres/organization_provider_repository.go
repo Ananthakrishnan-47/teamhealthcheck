@@ -79,13 +79,6 @@ func (r *OrganizationProviderRepository) ApplySnapshot(ctx context.Context, in o
 	for _, id := range in.PreservedMemberUserIDs {
 		deletionExemptUserIDs[id] = true
 	}
-	supervisorExemptUserIDs, err := protectedTeamSupervisorUserIDs(ctx, tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to evaluate protected supervisor chains: %w", err)
-	}
-	for id := range supervisorExemptUserIDs {
-		deletionExemptUserIDs[id] = true
-	}
 	snapshotTeamIDs := make(map[string]bool, len(in.Snapshot.Teams))
 	for _, t := range in.Snapshot.Teams {
 		snapshotTeamIDs[t.ID] = true
@@ -572,7 +565,23 @@ func deleteMissingTeams(ctx context.Context, tx *sql.Tx, missingTeamIDs []string
 // reference (a user_id with no matching users row), exactly as it already
 // could before this feature existed. That gap is pre-existing and out of
 // scope for this change.
+//
+// team_supervisors.user_id also cascades (migrations/000005), with no
+// exception for protected teams, so deleting a merely-unprotected user who
+// has since been added to a protected team's stored supervisor chain would
+// otherwise wipe that row even though the team itself is never touched by a
+// sync. The DELETE below guards against that inline, checking team_supervisors
+// in the same statement that removes the user -- not via a snapshot read
+// taken earlier in this transaction. A precomputed "is this user protected"
+// set, read once at the top of ApplySnapshot and trusted here several
+// statements later, would leave a race: a concurrent admin edit to a
+// protected team's supervisor chain (PUT /admin/teams/:id/supervisors, or a
+// reports_to change that re-derives a chain) could add this user to that
+// chain in the gap between the read and this delete, and the precomputed set
+// would never see it. Checking inline, in the same statement as the delete,
+// closes that gap instead of just shrinking it.
 func deleteMissingUsers(ctx context.Context, tx *sql.Tx, missingUserIDs []string, result *orgprovider.ApplyResult) error {
+	protectedTeamIDs := orgprovider.ProtectedTeamIDs()
 	for _, userID := range missingUserIDs {
 		var actionItemCount int
 		if err := tx.QueryRowContext(ctx, `
@@ -581,42 +590,29 @@ func deleteMissingUsers(ctx context.Context, tx *sql.Tx, missingUserIDs []string
 			return fmt.Errorf("failed to check action items for user %q: %w", userID, err)
 		}
 
-		if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, userID); err != nil {
+		res, err := tx.ExecContext(ctx, `
+			DELETE FROM users
+			WHERE id = $1
+			  AND NOT EXISTS (
+			      SELECT 1 FROM team_supervisors ts
+			      WHERE ts.user_id = $1 AND ts.team_id = ANY($2)
+			  )
+		`, userID, pq.Array(protectedTeamIDs))
+		if err != nil {
 			return fmt.Errorf("failed to delete user %q: %w", userID, err)
+		}
+
+		deleted, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to confirm deletion of user %q: %w", userID, err)
+		}
+		if deleted == 0 {
+			// A protected team's supervisor chain named this user by the time
+			// the delete ran -- leave them in place along with their row.
+			continue
 		}
 		result.UsersDeleted++
 		result.ActionItemsDeleted += actionItemCount
 	}
 	return nil
-}
-
-// protectedTeamSupervisorUserIDs returns every user currently named in a
-// protected team's stored supervisor chain (team_supervisors). A sync must
-// never delete one of these users: team_supervisors.user_id cascades on
-// delete (migrations/000005) with no exception for protected teams, so
-// deleting a merely-unprotected user who happens to sit in a protected team's
-// chain would silently wipe that row even though the team itself is never
-// touched by a sync. Callers fold this set into deletionExemptUserIDs so such
-// a user is treated as "present" regardless of what the provider reports.
-func protectedTeamSupervisorUserIDs(ctx context.Context, tx *sql.Tx) (map[string]bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT team_id, user_id FROM team_supervisors`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read team supervisors: %w", err)
-	}
-	defer rows.Close()
-
-	exempt := make(map[string]bool)
-	for rows.Next() {
-		var teamID, userID string
-		if err := rows.Scan(&teamID, &userID); err != nil {
-			return nil, fmt.Errorf("failed to scan team supervisor row: %w", err)
-		}
-		if orgprovider.IsProtectedTeam(teamID) {
-			exempt[userID] = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read team supervisors: %w", err)
-	}
-	return exempt, nil
 }

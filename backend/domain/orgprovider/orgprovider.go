@@ -77,6 +77,17 @@ func IsProtectedTeam(id string) bool {
 	return protectedTeamIDs[id]
 }
 
+// ProtectedTeamIDs returns every protected team id, for callers that need to
+// pass the set into a SQL query (e.g. to guard a cascading delete) rather
+// than check membership one id at a time.
+func ProtectedTeamIDs() []string {
+	ids := make([]string, 0, len(protectedTeamIDs))
+	for id := range protectedTeamIDs {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // SkipReasons reported when a snapshot record cannot be imported for this sync.
 const (
 	SkipReasonMissingLevel = "missing_hierarchy_level"
