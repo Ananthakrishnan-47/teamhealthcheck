@@ -90,9 +90,37 @@ export interface UpdateUserRequest {
   reportsTo?: string | null;
 }
 
+export interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+}
+
 export interface UsersListResponse {
   users: AdminUser[];
-  total: number;
+  pagination: PaginationMeta;
+}
+
+export interface ListUsersParams {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  role?: string;
+  signal?: AbortSignal;
+}
+
+export interface UserLite {
+  id: string;
+  username: string;
+  fullName: string;
+  hierarchyLevel: string;
+}
+
+export interface UsersLiteResponse {
+  users: UserLite[];
 }
 
 // ============================================================================
@@ -322,12 +350,38 @@ export async function deleteHierarchyLevel(levelId: string): Promise<void> {
 // ============================================================================
 
 /**
- * Fetches all users
+ * Fetches one page of users, with optional search/role filtering applied
+ * server-side.
  *
- * @returns List of all users with pagination info
+ * @param params - Pagination (page, pageSize), filters (search, role), and an
+ *   optional AbortSignal to cancel a stale in-flight request
+ * @returns The requested page of users plus pagination metadata
  */
-export async function listUsers(): Promise<UsersListResponse> {
-  return createApiClient<UsersListResponse>(`${API_BASE_URL}/api/v1/admin/users`);
+export async function listUsers(params: ListUsersParams = {}): Promise<UsersListResponse> {
+  const { page, pageSize, search, role, signal } = params;
+  const query = new URLSearchParams();
+  if (page !== undefined) query.set('page', String(page));
+  if (pageSize !== undefined) query.set('pageSize', String(pageSize));
+  if (search) query.set('search', search);
+  if (role) query.set('role', role);
+
+  const qs = query.toString();
+  return createApiClient<UsersListResponse>(
+    `${API_BASE_URL}/api/v1/admin/users${qs ? `?${qs}` : ''}`,
+    signal ? { signal } : undefined
+  );
+}
+
+/**
+ * Fetches minimal data (id, username, fullName, hierarchyLevel) for every
+ * user. Intended for dropdowns/pickers (team lead, reports-to) that need the
+ * full user set without the cost of the paginated listing's team-membership
+ * joins.
+ *
+ * @returns All users in minimal form
+ */
+export async function listUsersLite(): Promise<UsersLiteResponse> {
+  return createApiClient<UsersLiteResponse>(`${API_BASE_URL}/api/v1/admin/users/lite`);
 }
 
 /**
@@ -704,13 +758,6 @@ export async function listHierarchyLevelsCached(): Promise<HierarchyLevel[]> {
 }
 
 /**
- * Cached users list fetch
- */
-export async function listUsersCached(): Promise<UsersListResponse> {
-  return getCached('users-list', listUsers);
-}
-
-/**
  * Cached teams list fetch
  */
 export async function listAdminTeamsCached(): Promise<AdminTeamsListResponse> {
@@ -740,4 +787,235 @@ export function clearAdminCache(): void {
  */
 export function clearAdminCacheKeys(...keys: string[]): void {
   keys.forEach((key) => adminCache.delete(key));
+}
+
+// ============================================================================
+// ORGANIZATION PROVIDER API METHODS
+// ============================================================================
+
+/**
+ * Whether the external organization-data provider is configured.
+ *
+ * There is no token field: the provider credential lives only in the
+ * backend's environment configuration, never in the database or this response.
+ */
+export interface OrganizationProviderSettings {
+  provider: string;
+  /** DATA_PROVIDER_BASE_URL is set on the backend and passed construction-time validation. */
+  baseUrlConfigured: boolean;
+  /** DATA_PROVIDER_API_TOKEN is set on the backend. */
+  tokenConfigured: boolean;
+  /** Every prerequisite is met, so a sync can run. */
+  readyToSync: boolean;
+}
+
+/** A snapshot user that could not be imported, and why. */
+export interface SkippedProviderUser {
+  userId: string;
+  username: string;
+  hierarchyLevelId: string;
+  reason: string;
+}
+
+/** The outcome of one synchronization run. */
+export interface OrganizationSyncResult {
+  status: string;
+  teamsSynced: number;
+  usersSynced: number;
+  membershipsSynced: number;
+  membershipsRemoved: number;
+  healthChecksDisabled: number;
+  healthChecksEnabled: number;
+  usersDeleted: number;
+  teamsDeleted: number;
+  /** Action items removed as a side effect of the deletions above (cascaded, not held back). */
+  actionItemsDeleted: number;
+  usersSkipped: number;
+  skippedUsers?: SkippedProviderUser[];
+  managerLinksCleared: number;
+  teamLeadsCleared: number;
+  membershipsDiscarded: number;
+  /** True when this run only completed because an admin waived the mass-deletion hold. */
+  massDeletionOverridden?: boolean;
+  /** The counts that were waived, present only alongside massDeletionOverridden. */
+  massDeletion?: MassDeletionReport;
+  startedAt: string;
+  completedAt: string;
+}
+
+/**
+ * Fetches organization provider configuration readiness.
+ *
+ * There is no token field anywhere in this response: the provider credential
+ * lives only in the backend's environment configuration
+ * (DATA_PROVIDER_BASE_URL / DATA_PROVIDER_API_TOKEN) and is never entered,
+ * stored, or displayed through this UI.
+ */
+export async function getOrganizationProviderSettings(): Promise<OrganizationProviderSettings> {
+  return createApiClient<OrganizationProviderSettings>(
+    `${API_BASE_URL}/api/v1/admin/settings/organization-provider`
+  );
+}
+
+/**
+ * The mass-deletion threshold in force for the organization sync, and where it
+ * came from. Carries no provider credentials -- it is a safety percentage.
+ */
+export interface OrgSyncDeletionThreshold {
+  /** The percentage actually applied by the guard. */
+  maxDeletePercent: number;
+  /** 'admin' (saved here), 'environment' (ORG_SYNC_MAX_DELETE_PERCENT), or 'default'. */
+  source: 'admin' | 'environment' | 'default';
+  /** The recommended value, shown as a hint rather than hardcoded in the UI. */
+  defaultPercent: number;
+  minPercent: number;
+  maxPercent: number;
+  /**
+   * True while a running or held sync freezes the threshold. The backend
+   * enforces this independently -- the disabled controls are a courtesy, not
+   * the guarantee.
+   */
+  locked: boolean;
+  /** Why it is frozen: 'syncing' or 'held'. Absent when editable. */
+  lockReason?: 'syncing' | 'held';
+  /** The value in force for the run holding the lock, when one is. */
+  activeSyncThreshold?: number;
+}
+
+/** ErrorResponse.code returned when a threshold update is refused by the lock. */
+export const THRESHOLD_LOCKED_CODE = 'threshold_locked';
+
+/**
+ * Reads the mass-deletion threshold in force, resolved by the same precedence
+ * the sync itself uses.
+ */
+export async function getOrgSyncDeletionThreshold(): Promise<OrgSyncDeletionThreshold> {
+  return createApiClient<OrgSyncDeletionThreshold>(
+    `${API_BASE_URL}/api/v1/admin/settings/organization-provider/deletion-threshold`
+  );
+}
+
+/**
+ * Saves the mass-deletion threshold. Only finite values from 1 to 100 are
+ * accepted; the backend validates independently of this client.
+ */
+export async function updateOrgSyncDeletionThreshold(
+  maxDeletePercent: number
+): Promise<OrgSyncDeletionThreshold> {
+  return createApiClient<OrgSyncDeletionThreshold>(
+    `${API_BASE_URL}/api/v1/admin/settings/organization-provider/deletion-threshold`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ maxDeletePercent }),
+    }
+  );
+}
+
+/**
+ * Resolves a mass-deletion hold without applying it, which unfreezes the
+ * threshold. It applies nothing and deletes nothing -- the held sync stays
+ * unapplied. Overriding a hold is the separate, explicit Sync Anyway action.
+ */
+export async function dismissMassDeletionHold(): Promise<OrgSyncDeletionThreshold> {
+  return createApiClient<OrgSyncDeletionThreshold>(
+    `${API_BASE_URL}/api/v1/admin/organization-provider/sync/hold`,
+    { method: 'DELETE' }
+  );
+}
+
+/** How a deletion metric's rows are removed. */
+export type DeletionMetricKind = 'deleted' | 'cascaded';
+
+/** One entity type's share of the deletions a sync proposes. */
+export interface DeletionMetric {
+  /** 'deleted' for rows the sync removes directly, 'cascaded' for rows the database removes with them. */
+  kind: DeletionMetricKind;
+  /** Denominator: eligible (non-protected) rows currently in Team360. */
+  existing: number;
+  /**
+   * How many records of this type the provider's snapshot actually contained.
+   * Not part of the threshold math -- it is the number that tells an admin
+   * whether a surprising hold is a real mass departure or just an incomplete
+   * provider payload.
+   */
+  incoming: number;
+  /** Numerator: rows this sync proposes to remove. */
+  deleting: number;
+  /** deleting / existing * 100, as the backend guard computes it. */
+  percent: number;
+  /** The configured maximum percentage (default 20). */
+  threshold: number;
+  exceedsThreshold: boolean;
+  /** False for metrics reported for information only (memberships). */
+  contributesToHold: boolean;
+}
+
+/** The counts behind a sync the mass-deletion guard held. Aggregates only. */
+export interface MassDeletionReport {
+  threshold: number;
+  users: DeletionMetric;
+  teams: DeletionMetric;
+  /** Informational cascade metric; absent when the backend could not measure it. */
+  memberships?: DeletionMetric;
+}
+
+/** The typed `code` the backend sets on a held sync. */
+export const MASS_DELETION_HOLD_CODE = 'mass_deletion_hold';
+
+/**
+ * Extracts the mass-deletion report from a failed sync, or null if the failure
+ * was something else.
+ *
+ * Recognition is by the typed `code` field, not by matching message text.
+ */
+export function getMassDeletionHold(error: unknown): MassDeletionReport | null {
+  const apiError = (error as APIRequestError | undefined)?.apiError as
+    | { code?: string; massDeletion?: MassDeletionReport }
+    | undefined;
+  if (!apiError || apiError.code !== MASS_DELETION_HOLD_CODE) return null;
+  return apiError.massDeletion ?? null;
+}
+
+/** The four counts an admin reviewed on a held sync's response, echoed back
+ * to confirm an override. See syncOrganizationProvider. */
+export interface ConfirmedMassDeletion {
+  usersExisting: number;
+  usersDeleting: number;
+  teamsExisting: number;
+  teamsDeleting: number;
+}
+
+/**
+ * Triggers a manual organization sync
+ *
+ * Rewrites users, teams and memberships, so callers must clear the admin cache
+ * on success or the UI will keep serving pre-sync counts for up to two minutes.
+ *
+ * `overrideMassDeletion` waives the backend's mass-deletion hold for this one
+ * request. It is only ever sent after an admin has reviewed the held counts and
+ * explicitly confirmed; the backend re-checks admin privileges and never trusts
+ * this flag on its own. A plain sync sends no body at all, so the normal request
+ * is byte-for-byte what it was before this option existed.
+ *
+ * `confirmedMassDeletion` is required alongside `overrideMassDeletion`: every
+ * sync re-fetches the provider snapshot fresh, so a bare override flag would
+ * waive the guard for whatever that fresh fetch turns up, which may no longer
+ * be the deletion the admin actually reviewed. Pass the exact counts from the
+ * `MassDeletionReport` the held response carried -- the backend refuses the
+ * override (returning a fresh hold instead) if they no longer match.
+ */
+export async function syncOrganizationProvider(
+  options: { overrideMassDeletion?: boolean; confirmedMassDeletion?: ConfirmedMassDeletion } = {}
+): Promise<OrganizationSyncResult> {
+  const request: RequestInit = { method: 'POST' };
+  if (options.overrideMassDeletion) {
+    request.body = JSON.stringify({
+      overrideMassDeletion: true,
+      confirmedMassDeletion: options.confirmedMassDeletion,
+    });
+  }
+  return createApiClient<OrganizationSyncResult>(
+    `${API_BASE_URL}/api/v1/admin/organization-provider/sync`,
+    request
+  );
 }

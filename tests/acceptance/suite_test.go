@@ -240,6 +240,14 @@ var _ = SynchronizedBeforeSuite(
 
 		GinkgoWriter.Printf("✅ Test data seeded successfully\n")
 
+		// Start the stand-in organization data provider BEFORE the backend:
+		// cmd/api/main.go reads the provider configuration once at startup, so
+		// the fixture has to be listening by then for the server to ever see it.
+		// See e2e_organization_sync_test.go.
+		By("Starting the stand-in organization data provider")
+		providerURL := startOrgProviderFixture()
+		GinkgoWriter.Printf("✅ Organization data provider fixture listening on %s\n", providerURL)
+
 		// Start backend API server using gexec for proper process management
 		By("Starting backend API server")
 		backendCmd := exec.Command("go", "run", "cmd/api/main.go")
@@ -248,6 +256,17 @@ var _ = SynchronizedBeforeSuite(
 			"PORT=8080",
 			"APP_ENV=demo",
 			fmt.Sprintf("DATABASE_URL=%s", databaseURL),
+			fmt.Sprintf("%s=%s", providerBaseURLEnv, providerURL),
+			fmt.Sprintf("%s=%s", providerTokenEnv, providerFixtureToken),
+			// The mass-deletion guard defaults to 20%, which a sync in this suite
+			// would trip for a reason unrelated to what the sync spec asserts:
+			// other specs create their own non-protected users and teams at
+			// runtime and the fixture snapshot names none of them, so the
+			// deletion percentage depends on which specs happened to run first.
+			// The guard has dedicated coverage in the backend integration suite
+			// (organization_provider_sync_test.go); neutralize it here rather
+			// than make this run order-dependent.
+			"ORG_SYNC_MAX_DELETE_PERCENT=100",
 		)
 		// Set process group so we can kill all child processes
 		backendCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -377,6 +396,9 @@ var _ = SynchronizedAfterSuite(
 			Eventually(frontendSession, 10*time.Second).Should(gexec.Exit())
 			GinkgoWriter.Printf("Frontend server terminated\n")
 		}
+
+		stopOrgProviderFixture()
+		GinkgoWriter.Printf("Organization data provider fixture stopped\n")
 
 		// Also cleanup any orphaned processes by port (belt and suspenders)
 		exec.Command("bash", "-c", "lsof -ti:8080 | xargs kill -9 2>/dev/null").Run()
