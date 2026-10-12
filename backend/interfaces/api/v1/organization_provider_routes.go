@@ -63,5 +63,10 @@ func SetupOrganizationProviderRoutes(
 		// Persisted last-attempt result, for display after refresh,
 		// logout/login, or a process restart.
 		admin.GET("/organization-provider/sync/last-run", handler.GetOrgSyncLastRun)
+
+		// Append-only history of every sync outcome (manual and scheduled;
+		// success, blocked, failed, skipped), newest first. Each entry's runId
+		// matches the sync_run_id on that attempt's log lines.
+		admin.GET("/organization-provider/sync/history", handler.GetOrgSyncHistory)
 	}
 }

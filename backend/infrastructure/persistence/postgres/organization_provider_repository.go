@@ -261,7 +261,7 @@ func (r *OrganizationProviderRepository) ApplySnapshot(ctx context.Context, in o
 	return result, nil
 }
 
-// recordSuccessAttempt writes the org_sync_runs success row using the same
+// recordSuccessAttempt inserts the org_sync_runs success row using the same
 // transaction as the destructive writes it describes, so both commit
 // atomically together or neither does. Called only on the success path --
 // see ApplyInput's doc on Trigger/InstanceID/StartedAt.
@@ -276,39 +276,38 @@ func recordSuccessAttempt(
 		report.Teams.Deleting, report.Teams.Percent,
 		report.Threshold,
 	)
-	_, err := tx.ExecContext(ctx, `
-		UPDATE org_sync_runs SET
-			last_trigger = $1,
-			last_status = 'success',
-			last_started_at = $2,
-			last_finished_at = $3,
-			last_instance_id = $4,
-			last_threshold_percent = $5,
-			last_users_existing = $6,
-			last_users_deleting = $7,
-			last_users_percent = $8,
-			last_teams_existing = $9,
-			last_teams_deleting = $10,
-			last_teams_percent = $11,
-			last_writes_status = 'applied',
-			last_override_used = $12,
-			last_users_synced = $13,
-			last_teams_synced = $14,
-			last_message = $15,
-			hold_active = false,
-			hold_recorded_at = NULL,
-			updated_at = NOW()
-		WHERE id = 1
-	`,
-		in.Trigger, in.StartedAt, time.Now().UTC(), in.InstanceID, in.MaxDeletePercent,
-		report.Users.Existing, report.Users.Deleting, report.Users.Percent,
-		report.Teams.Existing, report.Teams.Deleting, report.Teams.Percent,
-		overrideUsed, usersSynced, teamsSynced, message,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to record sync attempt: %w", err)
+	runID := ensureRunID(in.RunID)
+	finishedAt := time.Now().UTC()
+
+	// A successful sync resolves any unresolved mass-deletion hold. Both
+	// statements run in the caller's transaction, so the hold clears exactly
+	// when the destructive writes commit.
+	if err := clearOrgSyncHolds(ctx, tx); err != nil {
+		return fmt.Errorf("failed to clear organization sync hold: %w", err)
 	}
-	return nil
+
+	// Same transaction as the destructive writes: the success row exists
+	// exactly when those writes commit, never otherwise.
+	return insertOrgSyncRun(ctx, tx, orgprovider.OrgSyncHistoryEntry{OrgSyncAttempt: orgprovider.OrgSyncAttempt{
+		RunID:            runID,
+		Trigger:          in.Trigger,
+		Status:           orgprovider.StatusSuccess,
+		StartedAt:        in.StartedAt,
+		FinishedAt:       finishedAt,
+		InstanceID:       in.InstanceID,
+		ThresholdPercent: &in.MaxDeletePercent,
+		UsersExisting:    &report.Users.Existing,
+		UsersDeleting:    &report.Users.Deleting,
+		UsersPercent:     &report.Users.Percent,
+		TeamsExisting:    &report.Teams.Existing,
+		TeamsDeleting:    &report.Teams.Deleting,
+		TeamsPercent:     &report.Teams.Percent,
+		WritesStatus:     orgprovider.WritesApplied,
+		OverrideUsed:     overrideUsed,
+		UsersSynced:      &usersSynced,
+		TeamsSynced:      &teamsSynced,
+		Message:          message,
+	}}, false)
 }
 
 // isProtectedUserRow/isProtectedTeamRow adapt orgprovider's protection rules

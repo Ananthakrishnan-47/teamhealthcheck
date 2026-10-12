@@ -16,6 +16,7 @@ import (
 	"github.com/agopalakrishnan/teams360/backend/domain/user"
 	"github.com/agopalakrishnan/teams360/backend/pkg/logger"
 	"github.com/agopalakrishnan/teams360/backend/pkg/orgsnapshot"
+	"github.com/google/uuid"
 )
 
 // EnvMaxDeletePercent names the environment variable configuring the
@@ -30,11 +31,6 @@ const EnvMaxDeletePercent = "ORG_SYNC_MAX_DELETE_PERCENT"
 // identically to the in-memory hold and to the durable hold_active flag, so
 // a restart-surviving hold expires on the same schedule an in-process one would.
 const MassDeletionHoldTTL = 30 * time.Minute
-
-// SyncHeartbeatInterval is how often a running sync refreshes its active-run
-// claim. Best-effort and independent of the sync's own outcome -- see
-// SyncRunRecorder's doc.
-const SyncHeartbeatInterval = 20 * time.Second
 
 // DefaultMaxDeletePercent is the mass-deletion threshold used when no
 // administrator has saved one and EnvMaxDeletePercent is unset or unusable.
@@ -80,9 +76,10 @@ var (
 // existing errors.Is(err, ErrSyncInProgress) check keeps matching untouched.
 type SyncInProgressError struct {
 	// Trigger is orgprovider.TriggerManual or orgprovider.TriggerScheduled,
-	// or "" when it could not be determined (an absent, stale, or unreadable
-	// remote claim) -- never guessed. A guessed trigger would be an assertion
-	// this type cannot support, in a message an admin acts on.
+	// or "" when it could not be determined (e.g. a lock held by another
+	// replica, which this process cannot attribute) -- never guessed. A
+	// guessed trigger would be an assertion this type cannot support, in a
+	// message an admin acts on.
 	Trigger string
 	// Remote is true when another replica holds the lock, not this process's
 	// own in-process admission flag.
@@ -151,6 +148,25 @@ func WithInstanceID(id string) Option {
 	}
 }
 
+// syncRun is the identity of one sync attempt, carried through the recording
+// and logging helpers so every row and log line about it agrees.
+type syncRun struct {
+	id         string
+	trigger    string
+	instanceID string
+	startedAt  time.Time
+}
+
+// log returns a logger that stamps every line with the run's identity. The
+// field names are what to search for in the log platform.
+func (r syncRun) log() *logger.Logger {
+	return logger.Get().WithFields(map[string]interface{}{
+		"sync_run_id": r.id,
+		"trigger":     r.trigger,
+		"instance_id": r.instanceID,
+	})
+}
+
 // SnapshotFetcher fetches a complete organization snapshot from an external
 // provider. The sync service depends on this interface, not a concrete
 // client, so a second provider can be added without touching orchestration.
@@ -163,6 +179,9 @@ type SnapshotFetcher interface {
 // SyncResult is the outcome of one synchronization run, returned to the API
 // caller. It never carries a token, header, or the raw provider payload.
 type SyncResult struct {
+	// RunID identifies this sync across the database, the logs and the API
+	// response -- search for it in the logs to see exactly what happened.
+	RunID  string `json:"runId"`
 	Status string `json:"status"`
 
 	TeamsSynced        int `json:"teamsSynced"`
@@ -214,6 +233,11 @@ type SyncOptions struct {
 	// override is used.
 	ActorUserID string
 
+	// RunID identifies this attempt (a UUID). Optional: the manual handler and
+	// the scheduler set it so the ID is known before the sync starts; when
+	// empty, SyncWithOptions generates one.
+	RunID string
+
 	// Trigger identifies what started this attempt: orgprovider.TriggerManual
 	// or orgprovider.TriggerScheduled. Empty defaults to TriggerManual -- the
 	// manual handler leaves this unset; the scheduler sets it explicitly.
@@ -238,9 +262,8 @@ type heldSync struct {
 // threshold is currently frozen, and what is currently running. The zero
 // value means editable and idle.
 type SyncLockState struct {
-	// Syncing is true while a run holds the admission lock -- on this replica
-	// (Remote false) or, per a readable active-run claim, on another one
-	// (Remote true).
+	// Syncing is true while a run holds the in-process admission lock on this
+	// replica.
 	Syncing bool
 	// Held is true while an unexpired mass-deletion hold is unresolved --
 	// fail-closed OR of the in-memory hold and the durable hold_active flag.
@@ -252,10 +275,6 @@ type SyncLockState struct {
 	// Trigger names what is Syncing, when known. Empty when unknown -- never
 	// guessed.
 	Trigger string
-	// Remote is true when Syncing reflects another replica's claim.
-	Remote bool
-	// Instance identifies the remote holder, when known.
-	Instance string
 }
 
 // Locked reports whether the threshold may be changed right now.
@@ -402,11 +421,20 @@ func (s *OrganizationSyncService) SchedulerBlocked() (bool, string) {
 // RecordSkip best-effort persists that a scheduled occurrence was skipped
 // rather than attempted. A nil SyncRunRecorder makes this a no-op, matching
 // every other best-effort recording method.
-func (s *OrganizationSyncService) RecordSkip(ctx context.Context, reason string) error {
+func (s *OrganizationSyncService) RecordSkip(ctx context.Context, runID, reason string) error {
 	if s.runs == nil {
 		return nil
 	}
-	return s.runs.RecordOrgSyncSkip(ctx, orgprovider.OrgSyncSkip{Reason: reason, At: time.Now().UTC()})
+	return s.runs.RecordOrgSyncSkip(ctx, orgprovider.OrgSyncSkip{RunID: runID, Reason: reason, At: time.Now().UTC()})
+}
+
+// GetHistory returns the most recent sync history entries, newest first.
+// Returns an empty list, not an error, when no SyncRunRecorder is configured.
+func (s *OrganizationSyncService) GetHistory(ctx context.Context, limit int) ([]orgprovider.OrgSyncHistoryEntry, error) {
+	if s.runs == nil {
+		return []orgprovider.OrgSyncHistoryEntry{}, nil
+	}
+	return s.runs.ListOrgSyncHistory(ctx, limit)
 }
 
 // SyncWithOptions fetches, validates and applies a snapshot.
@@ -427,12 +455,18 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 	if trigger == "" {
 		trigger = orgprovider.TriggerManual
 	}
+	runID := opts.RunID
+	if runID == "" {
+		runID = uuid.NewString()
+	}
+	run := syncRun{id: runID, trigger: trigger, instanceID: s.instanceID}
 
 	// Tier 1: in-process admission. Free, and catches the common same-replica
 	// case immediately. It is NO LONGER the cross-replica guarantee -- that is
 	// tier 2, below -- only the fast, free, local check.
 	if !s.running.CompareAndSwap(false, true) {
 		localTrigger, _ := s.runningTrigger.Load().(string)
+		run.log().WithField("running_trigger", localTrigger).Info("organization sync rejected: another sync is already in progress")
 		return nil, &SyncInProgressError{Trigger: localTrigger}
 	}
 	s.runningTrigger.Store(trigger)
@@ -443,6 +477,8 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 
 	log := logger.Get()
 	startedAt := time.Now().UTC()
+	run.startedAt = startedAt
+	run.log().Info("organization sync started")
 
 	if s.fetcher == nil {
 		return nil, ErrProviderNotConfigured
@@ -458,16 +494,11 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 			return nil, fmt.Errorf("failed to acquire the organization sync lock: %w", err)
 		}
 		if lock == nil {
-			return nil, s.remoteInProgressError(ctx, trigger)
+			run.log().Info("organization sync rejected: another instance holds the sync lock")
+			return nil, s.remoteInProgressError()
 		}
 		defer lock.Release()
 	}
-
-	// Best-effort liveness claim, for cross-replica attribution only -- never
-	// consulted to decide whether a sync may start. A failure here is logged
-	// and the sync proceeds; it must never change the sync's own outcome.
-	stopHeartbeat := s.claimActive(ctx, trigger, startedAt)
-	defer stopHeartbeat()
 
 	// Captured once, up front, and used for this entire attempt. While a hold
 	// is unresolved this returns the held attempt's own threshold (in-memory
@@ -475,20 +506,20 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 	// the answer to a hold -- only the explicit, authorized override is.
 	maxDeletePercent, err := s.thresholdForRun(ctx)
 	if err != nil {
-		return nil, s.failWith(ctx, trigger, startedAt, err)
+		return nil, s.failWith(ctx, run, err)
 	}
 
 	snapshot, err := s.fetcher.FetchSnapshot(ctx)
 	if err != nil {
-		return nil, s.failWith(ctx, trigger, startedAt, errors.Join(ErrProviderFetchFailed, err))
+		return nil, s.failWith(ctx, run, errors.Join(ErrProviderFetchFailed, err))
 	}
 	if snapshot == nil {
-		return nil, s.failWith(ctx, trigger, startedAt, errors.Join(ErrInvalidSnapshot, errors.New("provider returned no snapshot")))
+		return nil, s.failWith(ctx, run, errors.Join(ErrInvalidSnapshot, errors.New("provider returned no snapshot")))
 	}
 
 	knownLevels, err := s.repo.KnownHierarchyLevelIDs(ctx)
 	if err != nil {
-		return nil, s.failWith(ctx, trigger, startedAt, err)
+		return nil, s.failWith(ctx, run, err)
 	}
 
 	// Names a record identity, not a credential, so it is safe to return to
@@ -496,11 +527,11 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 	// failWith calls below.
 	filtered, err := FilterSnapshot(snapshot, knownLevels)
 	if err != nil {
-		return nil, s.failWith(ctx, trigger, startedAt, errors.Join(ErrInvalidSnapshot, err))
+		return nil, s.failWith(ctx, run, errors.Join(ErrInvalidSnapshot, err))
 	}
 
 	if err := filtered.Snapshot.ValidationError(); err != nil {
-		return nil, s.failWith(ctx, trigger, startedAt, errors.Join(ErrInvalidSnapshot, err))
+		return nil, s.failWith(ctx, run, errors.Join(ErrInvalidSnapshot, err))
 	}
 
 	applied, err := s.repo.ApplySnapshot(ctx, orgprovider.ApplyInput{
@@ -515,6 +546,7 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 		MaxDeletePercent:         maxDeletePercent,
 		OverrideMassDeletion:     opts.OverrideMassDeletion,
 		ConfirmedMassDeletion:    opts.ConfirmedMassDeletion,
+		RunID:                    run.id,
 		Trigger:                  trigger,
 		InstanceID:               s.instanceID,
 		StartedAt:                startedAt,
@@ -525,7 +557,7 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 		var hold *orgprovider.MassDeletionHoldError
 		if errors.As(err, &hold) {
 			s.recordHold(maxDeletePercent, hold.Report)
-			s.recordBlockedAttempt(ctx, trigger, startedAt, maxDeletePercent, hold.Report)
+			s.recordBlockedAttempt(ctx, run, maxDeletePercent, hold.Report)
 			return nil, err
 		}
 
@@ -537,7 +569,7 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 		if errors.Is(err, orgprovider.ErrSyncCommitAmbiguous) {
 			writesStatus = orgprovider.WritesUnknown
 		}
-		s.recordFailedAttempt(ctx, trigger, startedAt, writesStatus, err)
+		s.recordFailedAttempt(ctx, run, writesStatus, err)
 		return nil, err
 	}
 
@@ -557,6 +589,7 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 	supervisorChainErr := s.rederiveSupervisorChains(ctx, filtered.Snapshot.Teams)
 
 	result := &SyncResult{
+		RunID:                run.id,
 		Status:               "completed",
 		TeamsSynced:          applied.TeamsSynced,
 		UsersSynced:          applied.UsersSynced,
@@ -603,6 +636,10 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 	}
 
 	log.WithFields(map[string]interface{}{
+		"sync_run_id":       run.id,
+		"trigger":           run.trigger,
+		"instance_id":       run.instanceID,
+		"status":            result.Status,
 		"usersSynced":       result.UsersSynced,
 		"teamsSynced":       result.TeamsSynced,
 		"membershipsSynced": result.MembershipsSynced,
@@ -615,60 +652,10 @@ func (s *OrganizationSyncService) SyncWithOptions(ctx context.Context, opts Sync
 }
 
 // remoteInProgressError builds the conflict error when the distributed lock
-// is held by another replica. Best-effort attribution: an unreadable, absent,
-// or stale claim degrades to an unknown trigger rather than guessing, and
-// never raises a second failure that could block the refusal already known.
-func (s *OrganizationSyncService) remoteInProgressError(ctx context.Context, _ string) error {
-	if s.runs == nil {
-		return &SyncInProgressError{Remote: true}
-	}
-	claim, err := s.runs.GetOrgSyncActiveClaim(ctx, ActiveClaimStaleAfter)
-	if err != nil || claim == nil || claim.Stale {
-		return &SyncInProgressError{Remote: true}
-	}
-	return &SyncInProgressError{Remote: true, Trigger: claim.Trigger, Instance: claim.InstanceID}
-}
-
-// claimActive best-effort records that a run has started and starts a
-// heartbeat goroutine. Returns a stop function that must be deferred
-// immediately -- it stops the heartbeat and best-effort clears the claim.
-// Every failure here is logged only: this is attribution and UI accuracy,
-// never consulted to decide whether a sync may start, so it must never change
-// the sync's own outcome.
-func (s *OrganizationSyncService) claimActive(ctx context.Context, trigger string, startedAt time.Time) func() {
-	if s.runs == nil {
-		return func() {}
-	}
-	log := logger.Get()
-	if err := s.runs.ClaimOrgSyncActive(ctx, s.instanceID, trigger, startedAt); err != nil {
-		log.WithError(err).Warn("failed to claim organization sync active run")
-	}
-
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(SyncHeartbeatInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				if err := s.runs.HeartbeatOrgSyncActive(ctx, s.instanceID, time.Now().UTC()); err != nil {
-					log.WithError(err).Warn("failed to refresh organization sync active run heartbeat")
-				}
-			}
-		}
-	}()
-
-	return func() {
-		close(stop)
-		<-done
-		if err := s.runs.ClearOrgSyncActive(context.Background(), s.instanceID); err != nil {
-			log.WithError(err).Warn("failed to clear organization sync active run")
-		}
-	}
+// is held by another replica. This process cannot say which trigger or
+// instance holds it, so both are left unknown rather than guessed.
+func (s *OrganizationSyncService) remoteInProgressError() error {
+	return &SyncInProgressError{Remote: true}
 }
 
 // failWith records a confirmed-rollback failed attempt (writesStatus=none)
@@ -678,21 +665,28 @@ func (s *OrganizationSyncService) claimActive(ctx context.Context, trigger strin
 // even called, so none of them can have written anything -- WritesNone is
 // always correct here, unlike the ApplySnapshot error branch below, which
 // must distinguish a confirmed rollback from an ambiguous commit.
-func (s *OrganizationSyncService) failWith(ctx context.Context, trigger string, startedAt time.Time, err error) error {
-	s.recordFailedAttempt(ctx, trigger, startedAt, orgprovider.WritesNone, err)
+func (s *OrganizationSyncService) failWith(ctx context.Context, run syncRun, err error) error {
+	s.recordFailedAttempt(ctx, run, orgprovider.WritesNone, err)
 	return err
 }
 
 // recordFailedAttempt best-effort persists a failed outcome. Never changes
 // the sync's own return value -- see SyncRunRecorder's doc.
-func (s *OrganizationSyncService) recordFailedAttempt(ctx context.Context, trigger string, startedAt time.Time, writesStatus string, cause error) {
+func (s *OrganizationSyncService) recordFailedAttempt(ctx context.Context, run syncRun, writesStatus string, cause error) {
+	// Logged before the nil check so a failure is visible in the logs even
+	// where no durable recorder is wired.
+	run.log().WithError(cause).WithFields(map[string]interface{}{
+		"status":        orgprovider.StatusFailed,
+		"writes_status": writesStatus,
+	}).Error("organization sync failed")
 	if s.runs == nil {
 		return
 	}
 	attempt := orgprovider.OrgSyncAttempt{
-		Trigger:      trigger,
+		RunID:        run.id,
+		Trigger:      run.trigger,
 		Status:       orgprovider.StatusFailed,
-		StartedAt:    startedAt,
+		StartedAt:    run.startedAt,
 		FinishedAt:   time.Now().UTC(),
 		InstanceID:   s.instanceID,
 		WritesStatus: writesStatus,
@@ -706,16 +700,26 @@ func (s *OrganizationSyncService) recordFailedAttempt(ctx context.Context, trigg
 // recordBlockedAttempt best-effort persists a blocked outcome, durably
 // setting hold_active so threshold editing freezes on every replica -- see
 // LockState.
-func (s *OrganizationSyncService) recordBlockedAttempt(ctx context.Context, trigger string, startedAt time.Time, threshold float64, report orgprovider.MassDeletionReport) {
+func (s *OrganizationSyncService) recordBlockedAttempt(ctx context.Context, run syncRun, threshold float64, report orgprovider.MassDeletionReport) {
+	usersExisting, usersDeleting, teamsExisting, teamsDeleting := report.Users.Existing, report.Users.Deleting, report.Teams.Existing, report.Teams.Deleting
+	usersPercent, teamsPercent := report.Users.Percent, report.Teams.Percent
+	run.log().WithFields(map[string]interface{}{
+		"status":            orgprovider.StatusBlocked,
+		"writes_status":     orgprovider.WritesNone,
+		"threshold_percent": threshold,
+		"users_deleting":    usersDeleting,
+		"users_existing":    usersExisting,
+		"teams_deleting":    teamsDeleting,
+		"teams_existing":    teamsExisting,
+	}).Warn("organization sync blocked: mass-deletion threshold exceeded")
 	if s.runs == nil {
 		return
 	}
-	usersExisting, usersDeleting, teamsExisting, teamsDeleting := report.Users.Existing, report.Users.Deleting, report.Teams.Existing, report.Teams.Deleting
-	usersPercent, teamsPercent := report.Users.Percent, report.Teams.Percent
 	attempt := orgprovider.OrgSyncAttempt{
-		Trigger:          trigger,
+		RunID:            run.id,
+		Trigger:          run.trigger,
 		Status:           orgprovider.StatusBlocked,
-		StartedAt:        startedAt,
+		StartedAt:        run.startedAt,
 		FinishedAt:       time.Now().UTC(),
 		InstanceID:       s.instanceID,
 		ThresholdPercent: &threshold,
@@ -755,8 +759,8 @@ func formatCascade(m *orgprovider.DeletionMetric) string {
 // a round trip.
 //
 // An error here MUST be treated as "locked" by the caller, never as
-// "editable" -- a claim read error must never produce a false "editable"
-// response. When no SyncRunRecorder is configured, this returns exactly
+// "editable" -- a durable-hold read error must never produce a false
+// "editable" response. When no SyncRunRecorder is configured, this returns exactly
 // today's in-memory-only behaviour and never errors, preserving existing
 // no-database handler tests.
 func (s *OrganizationSyncService) LockState(ctx context.Context) (SyncLockState, error) {
@@ -787,23 +791,13 @@ func (s *OrganizationSyncService) LockState(ctx context.Context) (SyncLockState,
 	}
 	if lastRun.HoldActive && lastRun.HoldRecordedAt != nil && time.Since(*lastRun.HoldRecordedAt) <= MassDeletionHoldTTL {
 		state.Held = true
-		if lastRun.LastAttempt != nil && lastRun.LastAttempt.ThresholdPercent != nil {
+		switch {
+		case lastRun.HoldThresholdPercent != nil:
+			state.Threshold = *lastRun.HoldThresholdPercent
+		case lastRun.LastAttempt != nil && lastRun.LastAttempt.ThresholdPercent != nil:
 			state.Threshold = *lastRun.LastAttempt.ThresholdPercent
 		}
 		state.HeldAt = *lastRun.HoldRecordedAt
-	}
-
-	if !state.Syncing {
-		claim, err := s.runs.GetOrgSyncActiveClaim(ctx, ActiveClaimStaleAfter)
-		if err != nil {
-			return SyncLockState{}, fmt.Errorf("failed to read organization sync active run: %w", err)
-		}
-		if claim != nil && !claim.Stale && claim.InstanceID != s.instanceID {
-			state.Syncing = true
-			state.Remote = true
-			state.Trigger = claim.Trigger
-			state.Instance = claim.InstanceID
-		}
 	}
 
 	return state, nil

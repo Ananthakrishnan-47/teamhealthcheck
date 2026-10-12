@@ -11,6 +11,7 @@ import (
 	"github.com/agopalakrishnan/teams360/backend/application/services"
 	"github.com/agopalakrishnan/teams360/backend/domain/orgprovider"
 	"github.com/agopalakrishnan/teams360/backend/pkg/orgsnapshot"
+	"github.com/google/uuid"
 )
 
 // fakeRunRecorder is a hand-rolled fake of services.SyncRunRecorder, recording
@@ -25,11 +26,8 @@ type fakeRunRecorder struct {
 	lastRun    *orgprovider.OrgSyncLastRun
 	lastRunErr error
 
-	activeClaim    *orgprovider.OrgSyncActiveClaim
-	activeClaimErr error
-
-	claimed []string
-	cleared []string
+	history      []orgprovider.OrgSyncHistoryEntry
+	historyLimit int
 
 	clearHoldCalls int
 }
@@ -60,38 +58,18 @@ func (f *fakeRunRecorder) GetOrgSyncLastRun(_ context.Context) (*orgprovider.Org
 	return f.lastRun, nil
 }
 
+func (f *fakeRunRecorder) ListOrgSyncHistory(_ context.Context, limit int) ([]orgprovider.OrgSyncHistoryEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.historyLimit = limit
+	return f.history, nil
+}
+
 func (f *fakeRunRecorder) ClearOrgSyncHold(_ context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.clearHoldCalls++
 	return nil
-}
-
-func (f *fakeRunRecorder) ClaimOrgSyncActive(_ context.Context, instanceID, _ string, _ time.Time) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.claimed = append(f.claimed, instanceID)
-	return nil
-}
-
-func (f *fakeRunRecorder) HeartbeatOrgSyncActive(_ context.Context, _ string, _ time.Time) error {
-	return nil
-}
-
-func (f *fakeRunRecorder) ClearOrgSyncActive(_ context.Context, instanceID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.cleared = append(f.cleared, instanceID)
-	return nil
-}
-
-func (f *fakeRunRecorder) GetOrgSyncActiveClaim(_ context.Context, _ time.Duration) (*orgprovider.OrgSyncActiveClaim, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.activeClaimErr != nil {
-		return nil, f.activeClaimErr
-	}
-	return f.activeClaim, nil
 }
 
 func (f *fakeRunRecorder) attemptCount() int {
@@ -250,16 +228,11 @@ func TestConfiguredLockerErrorFailsSyncClosed(t *testing.T) {
 	}
 }
 
-func TestRemoteLockHeldNamesTriggerAndInstanceWhenReadable(t *testing.T) {
+func TestRemoteLockHeldIsReportedAsRemoteWithUnknownTrigger(t *testing.T) {
 	repo := &recordingRepo{}
 	locker := &fakeLocker{held: true}
-	recorder := &fakeRunRecorder{
-		activeClaim: &orgprovider.OrgSyncActiveClaim{
-			InstanceID: "replica-b", Trigger: orgprovider.TriggerScheduled, Stale: false,
-		},
-	}
 	service := services.NewOrganizationSyncService(repo, thresholdFetcher{}, nil, nil,
-		services.WithSyncLocker(locker), services.WithSyncRunRecorder(recorder))
+		services.WithSyncLocker(locker), services.WithSyncRunRecorder(&fakeRunRecorder{}))
 
 	_, err := service.Sync(context.Background())
 	var inProgress *services.SyncInProgressError
@@ -269,30 +242,8 @@ func TestRemoteLockHeldNamesTriggerAndInstanceWhenReadable(t *testing.T) {
 	if !inProgress.Remote {
 		t.Fatal("a lock held by another replica must be reported as remote")
 	}
-	if inProgress.Trigger != orgprovider.TriggerScheduled || inProgress.Instance != "replica-b" {
-		t.Fatalf("expected attribution to the remote scheduled run, got %+v", inProgress)
-	}
-}
-
-func TestRemoteLockHeldDegradesToUnknownTriggerWhenClaimIsUnreadable(t *testing.T) {
-	repo := &recordingRepo{}
-	locker := &fakeLocker{held: true}
-	recorder := &fakeRunRecorder{activeClaimErr: errors.New("connection reset")}
-	service := services.NewOrganizationSyncService(repo, thresholdFetcher{}, nil, nil,
-		services.WithSyncLocker(locker), services.WithSyncRunRecorder(recorder))
-
-	_, err := service.Sync(context.Background())
-	var inProgress *services.SyncInProgressError
-	if !errors.As(err, &inProgress) {
-		t.Fatalf("expected a *SyncInProgressError, got %v", err)
-	}
-	if inProgress.Trigger != "" {
-		t.Fatalf("an unreadable remote claim must degrade to an unknown trigger, not a guessed one; got %q", inProgress.Trigger)
-	}
-	// The refusal itself must still be sent -- an unreadable claim must never
-	// block the conflict response the caller already knows it must send.
-	if !inProgress.Remote {
-		t.Fatal("expected the refusal to still be reported as remote")
+	if inProgress.Trigger != "" || inProgress.Instance != "" {
+		t.Fatalf("this process cannot attribute a remote lock, so trigger and instance must stay unknown; got %+v", inProgress)
 	}
 }
 
@@ -452,24 +403,6 @@ func TestClearHoldClearsBothInMemoryAndDurable(t *testing.T) {
 	}
 	if service.DismissHold() {
 		t.Fatal("the in-memory hold should already be clear after ClearHold")
-	}
-}
-
-func TestClaimAndClearActiveRunAreBothCalled(t *testing.T) {
-	t.Setenv(services.EnvMaxDeletePercent, "20")
-	recorder := &fakeRunRecorder{}
-	service := services.NewOrganizationSyncService(&recordingRepo{}, thresholdFetcher{}, nil, nil,
-		services.WithInstanceID("test-instance"), services.WithSyncRunRecorder(recorder))
-
-	if _, err := service.Sync(context.Background()); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(recorder.claimed) != 1 || recorder.claimed[0] != "test-instance" {
-		t.Fatalf("expected the active run to be claimed under this instance, got %v", recorder.claimed)
-	}
-	if len(recorder.cleared) != 1 || recorder.cleared[0] != "test-instance" {
-		t.Fatalf("expected the active run claim to be cleared on completion, got %v", recorder.cleared)
 	}
 }
 
@@ -717,5 +650,141 @@ func TestPanicDuringSyncStillReleasesRunningFlag(t *testing.T) {
 	case <-repo.started:
 	default:
 		t.Fatal("expected the second sync to reach ApplySnapshot too -- the running flag must be released after a panic, not left stuck true")
+	}
+}
+
+// --- Run IDs ----------------------------------------------------------------
+
+func TestSyncStampsAFailedAttemptWithTheRunIDItWasGiven(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	recorder := &fakeRunRecorder{}
+	service := services.NewOrganizationSyncService(&genericFailingRepo{err: errors.New("boom")}, thresholdFetcher{}, nil, nil,
+		services.WithSyncRunRecorder(recorder))
+
+	given := uuid.NewString()
+	if _, err := service.SyncWithOptions(context.Background(), services.SyncOptions{RunID: given}); err == nil {
+		t.Fatal("expected an error")
+	}
+
+	if got := recorder.lastAttempt().RunID; got != given {
+		t.Fatalf("the recorded attempt must carry the run ID the caller supplied (%s), got %q", given, got)
+	}
+}
+
+func TestSyncGeneratesAValidRunIDWhenNoneIsGiven(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	recorder := &fakeRunRecorder{}
+	service := services.NewOrganizationSyncService(&genericFailingRepo{err: errors.New("boom")}, thresholdFetcher{}, nil, nil,
+		services.WithSyncRunRecorder(recorder))
+
+	if _, err := service.Sync(context.Background()); err == nil {
+		t.Fatal("expected an error")
+	}
+
+	if _, err := uuid.Parse(recorder.lastAttempt().RunID); err != nil {
+		t.Fatalf("expected a generated UUID run ID, got %q (%v)", recorder.lastAttempt().RunID, err)
+	}
+}
+
+func TestEachSyncGetsItsOwnRunID(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	recorder := &fakeRunRecorder{}
+	service := services.NewOrganizationSyncService(&genericFailingRepo{err: errors.New("boom")}, thresholdFetcher{}, nil, nil,
+		services.WithSyncRunRecorder(recorder))
+
+	_, _ = service.Sync(context.Background())
+	first := recorder.lastAttempt().RunID
+	_, _ = service.Sync(context.Background())
+	second := recorder.lastAttempt().RunID
+
+	if first == second {
+		t.Fatalf("two syncs must not share a run ID, both were %q", first)
+	}
+}
+
+func TestSuccessfulSyncReturnsItsRunID(t *testing.T) {
+	t.Setenv(services.EnvMaxDeletePercent, "20")
+	service := services.NewOrganizationSyncService(&recordingRepo{}, thresholdFetcher{}, nil, nil)
+
+	given := uuid.NewString()
+	result, err := service.SyncWithOptions(context.Background(), services.SyncOptions{RunID: given})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.RunID != given {
+		t.Fatalf("the result must carry the run ID (%s), got %q", given, result.RunID)
+	}
+}
+
+func TestRecordSkipPassesTheRunIDToTheRecorder(t *testing.T) {
+	recorder := &fakeRunRecorder{}
+	service := services.NewOrganizationSyncService(&recordingRepo{}, thresholdFetcher{}, nil, nil,
+		services.WithSyncRunRecorder(recorder))
+
+	given := uuid.NewString()
+	if err := service.RecordSkip(context.Background(), given, orgprovider.SkipManualRunning); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(recorder.skips) != 1 || recorder.skips[0].RunID != given || recorder.skips[0].Reason != orgprovider.SkipManualRunning {
+		t.Fatalf("expected one skip recorded under run ID %s, got %+v", given, recorder.skips)
+	}
+}
+
+func TestGetHistoryReadsFromTheRecorderWithTheRequestedLimit(t *testing.T) {
+	entry := orgprovider.OrgSyncHistoryEntry{OrgSyncAttempt: orgprovider.OrgSyncAttempt{RunID: uuid.NewString(), Status: orgprovider.StatusFailed}}
+	recorder := &fakeRunRecorder{history: []orgprovider.OrgSyncHistoryEntry{entry}}
+	service := services.NewOrganizationSyncService(&recordingRepo{}, thresholdFetcher{}, nil, nil,
+		services.WithSyncRunRecorder(recorder))
+
+	got, err := service.GetHistory(context.Background(), 25)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].RunID != entry.RunID {
+		t.Fatalf("expected the recorder's history to be returned, got %+v", got)
+	}
+	if recorder.historyLimit != 25 {
+		t.Fatalf("expected the limit to be passed through, got %d", recorder.historyLimit)
+	}
+}
+
+func TestGetHistoryIsEmptyNotAnErrorWithoutARecorder(t *testing.T) {
+	service := services.NewOrganizationSyncService(&recordingRepo{}, thresholdFetcher{}, nil, nil)
+
+	got, err := service.GetHistory(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Fatalf("expected an empty, non-nil list, got %#v", got)
+	}
+}
+
+func TestLockStateUsesTheHeldRowsThresholdNotTheLastAttempts(t *testing.T) {
+	// A blocked sync at 25%, then an unrelated failure: the last attempt has
+	// no threshold, but the durable hold must still report the one it was
+	// judged against.
+	held := 25.0
+	recorder := &fakeRunRecorder{
+		lastRun: &orgprovider.OrgSyncLastRun{
+			HoldActive:           true,
+			HoldRecordedAt:       timePtr(time.Now().UTC()),
+			HoldThresholdPercent: &held,
+			LastAttempt:          &orgprovider.OrgSyncAttempt{Status: orgprovider.StatusFailed},
+		},
+	}
+	service := services.NewOrganizationSyncService(&recordingRepo{}, thresholdFetcher{}, nil, nil,
+		services.WithSyncRunRecorder(recorder))
+
+	state, err := service.LockState(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !state.Held {
+		t.Fatal("expected the durable hold to freeze the threshold")
+	}
+	if state.Threshold != held {
+		t.Fatalf("expected the held threshold %v, got %v", held, state.Threshold)
 	}
 }

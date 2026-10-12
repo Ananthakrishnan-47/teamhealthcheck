@@ -415,9 +415,9 @@ func main() {
 	// kubevela/teams360-kubevela.yaml) -- otherwise Kubernetes SIGKILLs the
 	// process while Stop is still waiting, making the wait moot. It is also
 	// independent of SyncRunMaxDuration-style run bounds: an in-flight sync
-	// was started on a context detached from shutdown (see claimActive in
-	// organization_sync_service.go, which uses context.Background() for its
-	// own cleanup), so it is not aborted by cancel() above -- it keeps
+	// was started on a context detached from shutdown (see runCtx in
+	// scheduler.go, built with context.WithoutCancel), so it is not aborted
+	// by cancel() above -- it keeps
 	// running, unaware shutdown began, and gets a real chance to finish
 	// within this window instead of being cut off for no benefit. If it
 	// does not finish within the grace, Stop gives up waiting and the

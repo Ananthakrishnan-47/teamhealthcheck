@@ -14,6 +14,7 @@ import (
 	"github.com/agopalakrishnan/teams360/backend/domain/organization"
 	"github.com/agopalakrishnan/teams360/backend/domain/orgprovider"
 	"github.com/agopalakrishnan/teams360/backend/pkg/logger"
+	"github.com/google/uuid"
 )
 
 // fakeClock is a controllable Clock.
@@ -93,12 +94,15 @@ type fakeSyncer struct {
 	syncCalled int
 
 	skips         []string
+	skipRunIDs    []string
+	syncRunIDs    []string
 	recordSkipErr error
 }
 
-func (f *fakeSyncer) SyncWithOptions(_ context.Context, _ services.SyncOptions) (*services.SyncResult, error) {
+func (f *fakeSyncer) SyncWithOptions(_ context.Context, opts services.SyncOptions) (*services.SyncResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.syncRunIDs = append(f.syncRunIDs, opts.RunID)
 	f.syncCalled++
 	if f.syncErr != nil {
 		return nil, f.syncErr
@@ -112,13 +116,14 @@ func (f *fakeSyncer) SchedulerBlocked() (bool, string) {
 	return f.blocked, f.blockedReason
 }
 
-func (f *fakeSyncer) RecordSkip(_ context.Context, reason string) error {
+func (f *fakeSyncer) RecordSkip(_ context.Context, runID, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.recordSkipErr != nil {
 		return f.recordSkipErr
 	}
 	f.skips = append(f.skips, reason)
+	f.skipRunIDs = append(f.skipRunIDs, runID)
 	return nil
 }
 
@@ -429,9 +434,9 @@ func (c *capturingSyncer) SyncWithOptions(_ context.Context, opts services.SyncO
 	}
 	return &services.SyncResult{Status: "completed"}, nil
 }
-func (c *capturingSyncer) SchedulerBlocked() (bool, string)             { return false, "" }
-func (c *capturingSyncer) RecordSkip(_ context.Context, _ string) error { return nil }
-func (c *capturingSyncer) Configured() bool                             { return true }
+func (c *capturingSyncer) SchedulerBlocked() (bool, string)                { return false, "" }
+func (c *capturingSyncer) RecordSkip(_ context.Context, _, _ string) error { return nil }
+func (c *capturingSyncer) Configured() bool                                { return true }
 func (c *capturingSyncer) syncCallCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -488,5 +493,50 @@ func TestSchedulerLogsSkipOnlyAfterSuccessfulPersistence(t *testing.T) {
 	}
 	if !strings.Contains(out, orgprovider.SkipManualRunning) {
 		t.Fatalf("expected the skip reason in the skip log, got: %s", out)
+	}
+}
+
+// TestSchedulerGivesTheSyncAValidRunID verifies a scheduled run is handed a
+// UUID, so the sync's log lines, its database rows and the scheduler's own
+// log lines all share one searchable ID.
+func TestSchedulerGivesTheSyncAValidRunID(t *testing.T) {
+	now := time.Date(2026, 3, 10, 3, 0, 0, 0, time.UTC)
+	due := now.Add(-time.Minute)
+	clock := &fakeClock{now: now}
+	store := &fakeStore{
+		schedule:  &organization.OrgSyncSchedule{Enabled: true, Frequency: organization.OrgSyncFrequencyDaily, NextRunAt: timePtr(due)},
+		claimWins: true,
+	}
+	syncer := &fakeSyncer{}
+	_, _ = startTestScheduler(t, syncer, store, clock)
+
+	waitForCondition(t, time.Second, func() bool { return syncer.syncCallCount() == 1 })
+
+	syncer.mu.Lock()
+	defer syncer.mu.Unlock()
+	if _, err := uuid.Parse(syncer.syncRunIDs[0]); err != nil {
+		t.Fatalf("expected the scheduler to pass a valid UUID run ID to the sync, got %q (%v)", syncer.syncRunIDs[0], err)
+	}
+}
+
+// TestSchedulerGivesASkippedOccurrenceItsOwnValidRunID verifies a skipped
+// occurrence is also identifiable: the skip is recorded under a UUID.
+func TestSchedulerGivesASkippedOccurrenceItsOwnValidRunID(t *testing.T) {
+	now := time.Date(2026, 3, 10, 3, 0, 0, 0, time.UTC)
+	due := now.Add(-time.Minute)
+	clock := &fakeClock{now: now}
+	store := &fakeStore{
+		schedule:  &organization.OrgSyncSchedule{Enabled: true, Frequency: organization.OrgSyncFrequencyDaily, NextRunAt: timePtr(due)},
+		claimWins: true,
+	}
+	syncer := &fakeSyncer{blocked: true, blockedReason: orgprovider.SkipManualRunning}
+	_, _ = startTestScheduler(t, syncer, store, clock)
+
+	waitForCondition(t, time.Second, func() bool { return syncer.skipCount() == 1 })
+
+	syncer.mu.Lock()
+	defer syncer.mu.Unlock()
+	if _, err := uuid.Parse(syncer.skipRunIDs[0]); err != nil {
+		t.Fatalf("expected the skip to be recorded under a valid UUID run ID, got %q (%v)", syncer.skipRunIDs[0], err)
 	}
 }

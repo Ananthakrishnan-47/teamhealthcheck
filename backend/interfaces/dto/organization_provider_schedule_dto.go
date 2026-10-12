@@ -38,6 +38,8 @@ type OrgSyncLastRunDTO struct {
 // attempt that never evaluated a threshold -- never 0, which would read as a
 // safe sync.
 type OrgSyncAttemptDTO struct {
+	// RunID is the UUID that also appears on this attempt's log lines.
+	RunID      string `json:"runId,omitempty"`
 	Trigger    string `json:"trigger"`
 	Status     string `json:"status"`
 	StartedAt  string `json:"startedAt"`
@@ -66,6 +68,43 @@ type OrgSyncAttemptDTO struct {
 // OrgSyncSkipDTO is the most recent scheduled occurrence that was skipped
 // rather than attempted.
 type OrgSyncSkipDTO struct {
+	// RunID is the UUID that also appears on this skip's log line.
+	RunID  string `json:"runId,omitempty"`
 	Reason string `json:"reason"`
 	At     string `json:"at"`
+}
+
+// OrgSyncHistoryEntryDTO is one row of the sync history: an attempt that ran
+// (success, blocked, failed) or a skipped scheduled occurrence. Count and
+// percent fields are nil when not computed -- never 0, which would read as a
+// safe sync.
+type OrgSyncHistoryEntryDTO struct {
+	// RunID is the UUID to search for in the logs.
+	RunID      string `json:"runId"`
+	Trigger    string `json:"trigger"`
+	Status     string `json:"status"` // success | blocked | failed | skipped
+	StartedAt  string `json:"startedAt"`
+	FinishedAt string `json:"finishedAt"`
+	InstanceID string `json:"instanceId,omitempty"`
+
+	ThresholdPercent *float64 `json:"thresholdPercent,omitempty"`
+	UsersExisting    *int     `json:"usersExisting,omitempty"`
+	UsersDeleting    *int     `json:"usersDeleting,omitempty"`
+	UsersPercent     *float64 `json:"usersPercent,omitempty"`
+	TeamsExisting    *int     `json:"teamsExisting,omitempty"`
+	TeamsDeleting    *int     `json:"teamsDeleting,omitempty"`
+	TeamsPercent     *float64 `json:"teamsPercent,omitempty"`
+
+	WritesStatus string `json:"writesStatus"`
+	OverrideUsed bool   `json:"overrideUsed"`
+
+	UsersSynced *int   `json:"usersSynced,omitempty"`
+	TeamsSynced *int   `json:"teamsSynced,omitempty"`
+	SkipReason  string `json:"skipReason,omitempty"`
+	Message     string `json:"message"`
+}
+
+// OrgSyncHistoryDTO is the body of GET .../sync/history, newest first.
+type OrgSyncHistoryDTO struct {
+	Entries []OrgSyncHistoryEntryDTO `json:"entries"`
 }

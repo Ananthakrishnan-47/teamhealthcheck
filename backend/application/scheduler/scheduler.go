@@ -9,6 +9,7 @@ import (
 	"github.com/agopalakrishnan/teams360/backend/domain/organization"
 	"github.com/agopalakrishnan/teams360/backend/domain/orgprovider"
 	"github.com/agopalakrishnan/teams360/backend/pkg/logger"
+	"github.com/google/uuid"
 )
 
 // PollInterval is how often the scheduler checks whether the schedule is
@@ -44,7 +45,7 @@ const SyncRunMaxDuration = 15 * time.Minute
 type Syncer interface {
 	SyncWithOptions(ctx context.Context, opts services.SyncOptions) (*services.SyncResult, error)
 	SchedulerBlocked() (blocked bool, reason string)
-	RecordSkip(ctx context.Context, reason string) error
+	RecordSkip(ctx context.Context, runID, reason string) error
 	Configured() bool
 }
 
@@ -225,15 +226,21 @@ func (s *Scheduler) tick(ctx context.Context) {
 		return
 	}
 
+	// One ID per claimed occurrence: it names the sync if one runs, or the
+	// skip record if the occurrence is skipped, and is stamped on every log
+	// line below so the whole outcome can be found by searching for it.
+	runID := uuid.NewString()
+
 	if catchUpExceeded {
-		if err := s.syncer.RecordSkip(ctx, orgprovider.SkipOverdueCatchUp); err != nil {
+		if err := s.syncer.RecordSkip(ctx, runID, orgprovider.SkipOverdueCatchUp); err != nil {
 			log.WithError(err).Warn("failed to record organization sync catch-up skip")
 			return
 		}
 		log.WithFields(map[string]any{
-			"trigger": orgprovider.TriggerScheduled,
-			"reason":  orgprovider.SkipOverdueCatchUp,
-			"at":      now,
+			"sync_run_id": runID,
+			"trigger":     orgprovider.TriggerScheduled,
+			"reason":      orgprovider.SkipOverdueCatchUp,
+			"at":          now,
 		}).Info("scheduled organization sync skipped")
 		return
 	}
@@ -243,14 +250,15 @@ func (s *Scheduler) tick(ctx context.Context) {
 	// collision this replica already knows about costs one predicate, not a
 	// wasted sync attempt.
 	if blocked, reason := s.syncer.SchedulerBlocked(); blocked {
-		if err := s.syncer.RecordSkip(ctx, reason); err != nil {
+		if err := s.syncer.RecordSkip(ctx, runID, reason); err != nil {
 			log.WithError(err).Warn("failed to record organization sync skip")
 			return
 		}
 		log.WithFields(map[string]any{
-			"trigger": orgprovider.TriggerScheduled,
-			"reason":  reason,
-			"at":      now,
+			"sync_run_id": runID,
+			"trigger":     orgprovider.TriggerScheduled,
+			"reason":      reason,
+			"at":          now,
 		}).Info("scheduled organization sync skipped")
 		return
 	}
@@ -267,9 +275,9 @@ func (s *Scheduler) tick(ctx context.Context) {
 	runCtx, cancelRun := context.WithTimeout(context.WithoutCancel(ctx), SyncRunMaxDuration)
 	defer cancelRun()
 
-	result, syncErr := s.syncer.SyncWithOptions(runCtx, services.SyncOptions{Trigger: orgprovider.TriggerScheduled})
+	result, syncErr := s.syncer.SyncWithOptions(runCtx, services.SyncOptions{Trigger: orgprovider.TriggerScheduled, RunID: runID})
 	if syncErr == nil {
-		log.WithFields(map[string]any{"usersDeleted": result.UsersDeleted, "teamsDeleted": result.TeamsDeleted}).
+		log.WithFields(map[string]any{"sync_run_id": runID, "usersDeleted": result.UsersDeleted, "teamsDeleted": result.TeamsDeleted}).
 			Info("scheduled organization sync completed")
 		return
 	}
@@ -292,11 +300,12 @@ func (s *Scheduler) tick(ctx context.Context) {
 		// already-rare events (a genuine cross-replica collision AND an
 		// unreadable claim at the same instant). Recorded as the more common
 		// manual-collision bucket instead.
-		if err := s.syncer.RecordSkip(ctx, reason); err != nil {
+		if err := s.syncer.RecordSkip(ctx, runID, reason); err != nil {
 			log.WithError(err).Warn("failed to record organization sync skip")
 			return
 		}
 		log.WithFields(map[string]any{
+			"sync_run_id":       runID,
 			"trigger":           orgprovider.TriggerScheduled,
 			"reason":            reason,
 			"at":                now,
@@ -309,5 +318,5 @@ func (s *Scheduler) tick(ctx context.Context) {
 	// Any other error (blocked, technical failure) was already recorded by
 	// SyncWithOptions itself -- see recordBlockedAttempt/failWith. Nothing
 	// further to do here; log for operational visibility only.
-	log.WithError(syncErr).Info("scheduled organization sync did not complete")
+	log.WithError(syncErr).WithField("sync_run_id", runID).Info("scheduled organization sync did not complete")
 }

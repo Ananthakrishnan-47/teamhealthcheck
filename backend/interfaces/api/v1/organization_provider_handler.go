@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/agopalakrishnan/teams360/backend/application/scheduler"
@@ -18,6 +19,7 @@ import (
 	"github.com/agopalakrishnan/teams360/backend/interfaces/middleware"
 	"github.com/agopalakrishnan/teams360/backend/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // OrganizationProviderHandler serves the external organization-data provider
@@ -476,6 +478,7 @@ func orgSyncLastRunResponse(last *orgprovider.OrgSyncLastRun) dto.OrgSyncLastRun
 	}
 	if a := last.LastAttempt; a != nil {
 		resp.LastAttempt = &dto.OrgSyncAttemptDTO{
+			RunID:            a.RunID,
 			Trigger:          a.Trigger,
 			Status:           a.Status,
 			StartedAt:        a.StartedAt.UTC().Format(time.RFC3339),
@@ -496,9 +499,83 @@ func orgSyncLastRunResponse(last *orgprovider.OrgSyncLastRun) dto.OrgSyncLastRun
 	}
 	if sk := last.LastSkip; sk != nil {
 		resp.LastSkip = &dto.OrgSyncSkipDTO{
+			RunID:  sk.RunID,
 			Reason: sk.Reason,
 			At:     sk.At.UTC().Format(time.RFC3339),
 		}
+	}
+	return resp
+}
+
+// SyncRunIDHeader carries the run ID of a manual sync on every response to
+// POST .../sync, success or failure, so an admin can quote it and an operator
+// can find that sync's log lines.
+const SyncRunIDHeader = "X-Sync-Run-Id"
+
+const (
+	defaultSyncHistoryLimit = 50
+	maxSyncHistoryLimit     = 200
+)
+
+// GetOrgSyncHistory handles
+// GET /api/v1/admin/organization-provider/sync/history?limit=N.
+//
+// Returns the most recent sync outcomes -- manual and scheduled, success,
+// blocked, failed and skipped -- newest first. limit defaults to 50 and is
+// capped at 200.
+func (h *OrganizationProviderHandler) GetOrgSyncHistory(c *gin.Context) {
+	limit := defaultSyncHistoryLimit
+	if raw := c.Query("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+				Error:   "Invalid limit",
+				Message: "limit must be a positive integer",
+			})
+			return
+		}
+		limit = min(n, maxSyncHistoryLimit)
+	}
+
+	if h.syncService == nil {
+		c.JSON(http.StatusOK, dto.OrgSyncHistoryDTO{Entries: []dto.OrgSyncHistoryEntryDTO{}})
+		return
+	}
+	entries, err := h.syncService.GetHistory(c.Request.Context(), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "Failed to fetch the organization sync history",
+			Message: err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, orgSyncHistoryResponse(entries))
+}
+
+func orgSyncHistoryResponse(entries []orgprovider.OrgSyncHistoryEntry) dto.OrgSyncHistoryDTO {
+	resp := dto.OrgSyncHistoryDTO{Entries: make([]dto.OrgSyncHistoryEntryDTO, 0, len(entries))}
+	for _, e := range entries {
+		resp.Entries = append(resp.Entries, dto.OrgSyncHistoryEntryDTO{
+			RunID:            e.RunID,
+			Trigger:          e.Trigger,
+			Status:           e.Status,
+			StartedAt:        e.StartedAt.UTC().Format(time.RFC3339),
+			FinishedAt:       e.FinishedAt.UTC().Format(time.RFC3339),
+			InstanceID:       e.InstanceID,
+			ThresholdPercent: e.ThresholdPercent,
+			UsersExisting:    e.UsersExisting,
+			UsersDeleting:    e.UsersDeleting,
+			UsersPercent:     e.UsersPercent,
+			TeamsExisting:    e.TeamsExisting,
+			TeamsDeleting:    e.TeamsDeleting,
+			TeamsPercent:     e.TeamsPercent,
+			WritesStatus:     e.WritesStatus,
+			OverrideUsed:     e.OverrideUsed,
+			UsersSynced:      e.UsersSynced,
+			TeamsSynced:      e.TeamsSynced,
+			SkipReason:       e.SkipReason,
+			Message:          e.Message,
+		})
 	}
 	return resp
 }
@@ -526,6 +603,12 @@ func (h *OrganizationProviderHandler) Sync(c *gin.Context) {
 	}
 
 	actorID, _ := middleware.GetUserIDFromContext(c)
+
+	// Generated here, before the sync starts, so the ID reaches the caller on
+	// every outcome -- including errors -- as a header, and is the same ID the
+	// sync stamps on its log lines and stores in the database.
+	runID := uuid.NewString()
+	c.Header(SyncRunIDHeader, runID)
 
 	if request.OverrideMassDeletion && !isAdminRequest(c) {
 		logger.Get().Security("org_sync_mass_deletion_override_denied").
@@ -568,6 +651,7 @@ func (h *OrganizationProviderHandler) Sync(c *gin.Context) {
 		OverrideMassDeletion:  request.OverrideMassDeletion,
 		ConfirmedMassDeletion: confirmed,
 		ActorUserID:           actorID,
+		RunID:                 runID,
 	})
 	if err != nil {
 		status, response := mapSyncError(err)

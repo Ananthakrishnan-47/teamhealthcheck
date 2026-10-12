@@ -99,18 +99,23 @@ var _ = Describe("Integration: Organization Sync Run Repository", func() {
 		)
 	}
 
-	It("seeds org_sync_runs with a single all-NULL row before any sync has run", func() {
-		Expect(countRows(`SELECT COUNT(*) FROM org_sync_runs`)).To(Equal(1))
-		Expect(countRows(`SELECT COUNT(*) FROM org_sync_runs WHERE last_status IS NULL AND last_writes_status = 'none'`)).To(Equal(1))
+	It("starts empty: org_sync_runs has no row until a sync request is recorded", func() {
+		Expect(countRows(`SELECT COUNT(*) FROM org_sync_runs`)).To(Equal(0))
 	})
 
 	It("rejects an invalid writes_status via the CHECK constraint rather than silently accepting it", func() {
-		_, err := db.Exec(`UPDATE org_sync_runs SET last_writes_status = 'maybe' WHERE id = 1`)
+		_, err := db.Exec(`
+			INSERT INTO org_sync_runs (run_id, trigger, status, started_at, finished_at, writes_status)
+			VALUES (gen_random_uuid(), 'manual', 'failed', NOW(), NOW(), 'maybe')
+		`)
 		Expect(err).To(HaveOccurred())
 	})
 
 	It("rejects an invalid skip_reason via the CHECK constraint", func() {
-		_, err := db.Exec(`UPDATE org_sync_runs SET last_skip_reason = 'because_i_felt_like_it' WHERE id = 1`)
+		_, err := db.Exec(`
+			INSERT INTO org_sync_runs (run_id, trigger, status, started_at, finished_at, skip_reason)
+			VALUES (gen_random_uuid(), 'scheduled', 'skipped', NOW(), NOW(), 'because_i_felt_like_it')
+		`)
 		Expect(err).To(HaveOccurred())
 	})
 
