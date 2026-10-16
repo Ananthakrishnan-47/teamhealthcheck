@@ -1150,7 +1150,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns every user in the organization, including their profile, hierarchy level, reports-to, team IDs, auth type, and timestamps. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
+                "description": "Returns a page of users, including their profile, hierarchy level, reports-to, team IDs, auth type, and timestamps. Supports pagination and filtering by search text and hierarchy level. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
                 "produces": [
                     "application/json"
                 ],
@@ -1158,6 +1158,35 @@ const docTemplate = `{
                     "Admin Users"
                 ],
                 "summary": "List users",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number, starting at 1",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "type": "integer",
+                        "default": 25,
+                        "description": "Users per page (max 100)",
+                        "name": "pageSize",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive substring match on username, full name or email",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact hierarchy level id, for example level-5",
+                        "name": "role",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -4631,15 +4660,43 @@ const docTemplate = `{
         },
         "UsersResponse": {
             "properties": {
-                "total": {
-                    "example": 5,
-                    "type": "integer"
+                "pagination": {
+                    "$ref": "#/definitions/dto.PaginationDTO"
                 },
                 "users": {
                     "items": {
                         "$ref": "#/definitions/AdminUserDTO"
                     },
                     "type": "array"
+                }
+            },
+            "type": "object"
+        },
+        "dto.PaginationDTO": {
+            "properties": {
+                "hasNextPage": {
+                    "example": false,
+                    "type": "boolean"
+                },
+                "hasPreviousPage": {
+                    "example": false,
+                    "type": "boolean"
+                },
+                "page": {
+                    "example": 1,
+                    "type": "integer"
+                },
+                "pageSize": {
+                    "example": 25,
+                    "type": "integer"
+                },
+                "totalItems": {
+                    "example": 5,
+                    "type": "integer"
+                },
+                "totalPages": {
+                    "example": 1,
+                    "type": "integer"
                 }
             },
             "type": "object"

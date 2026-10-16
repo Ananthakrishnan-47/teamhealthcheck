@@ -1294,13 +1294,33 @@ definitions:
         type: object
     UsersResponse:
         properties:
-            total:
-                example: 5
-                type: integer
+            pagination:
+                $ref: '#/definitions/dto.PaginationDTO'
             users:
                 items:
                     $ref: '#/definitions/AdminUserDTO'
                 type: array
+        type: object
+    dto.PaginationDTO:
+        properties:
+            hasNextPage:
+                example: false
+                type: boolean
+            hasPreviousPage:
+                example: false
+                type: boolean
+            page:
+                example: 1
+                type: integer
+            pageSize:
+                example: 25
+                type: integer
+            totalItems:
+                example: 5
+                type: integer
+            totalPages:
+                example: 1
+                type: integer
         type: object
 info:
     contact: {}
@@ -2024,7 +2044,27 @@ paths:
                 - Admin Teams
     /admin/users:
         get:
-            description: Returns every user in the organization, including their profile, hierarchy level, reports-to, team IDs, auth type, and timestamps. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+            description: Returns a page of users, including their profile, hierarchy level, reports-to, team IDs, auth type, and timestamps. Supports pagination and filtering by search text and hierarchy level. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+            parameters:
+                - default: 1
+                  description: Page number, starting at 1
+                  in: query
+                  name: page
+                  type: integer
+                - default: 25
+                  description: Users per page (max 100)
+                  in: query
+                  maximum: 100
+                  name: pageSize
+                  type: integer
+                - description: Case-insensitive substring match on username, full name or email
+                  in: query
+                  name: search
+                  type: string
+                - description: Exact hierarchy level id, for example level-5
+                  in: query
+                  name: role
+                  type: string
             produces:
                 - application/json
             responses:
