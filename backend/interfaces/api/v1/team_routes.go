@@ -36,6 +36,8 @@ func NewTeamHandler(healthCheckRepo healthcheck.Repository, teamRepo team.Reposi
 // @Param teamId path string true "Team ID"
 // @Param assessmentPeriod query string false "Filter by assessment period"
 // @Success 200 {object} dto.HealthCheckSessionsResponse
+// @Failure 401 {object} dto.ErrorResponse "Missing, invalid or expired token"
+// @Failure 403 {object} dto.ErrorResponse "Access denied: team membership or manager-or-above privileges required"
 // @Failure 400 {object} dto.ErrorResponse "Team ID is required"
 // @Failure 500 {object} dto.ErrorResponse "Failed to fetch team sessions"
 // @Security BearerAuth
@@ -101,6 +103,8 @@ func (h *TeamHandler) GetTeamSessions(c *gin.Context) {
 // @Produce json
 // @Param teamId path string true "Team ID"
 // @Success 200 {object} dto.TeamInfoResponse
+// @Failure 401 {object} dto.ErrorResponse "Missing, invalid or expired token"
+// @Failure 403 {object} dto.ErrorResponse "Access denied: team membership or manager-or-above privileges required"
 // @Failure 400 {object} dto.ErrorResponse "Team ID is required"
 // @Failure 404 {object} dto.ErrorResponse "Team not found"
 // @Failure 500 {object} dto.ErrorResponse "Failed to fetch team members"

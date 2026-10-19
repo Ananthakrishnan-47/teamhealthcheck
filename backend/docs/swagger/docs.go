@@ -2659,6 +2659,18 @@ const docTemplate = `{
                             "$ref": "#/definitions/ErrorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Missing, invalid or expired token",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied: team membership or manager-or-above privileges required",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
                     "404": {
                         "description": "Team not found",
                         "schema": {
@@ -2713,6 +2725,18 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Team ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, invalid or expired token",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied: team membership or manager-or-above privileges required",
                         "schema": {
                             "$ref": "#/definitions/ErrorResponse"
                         }
