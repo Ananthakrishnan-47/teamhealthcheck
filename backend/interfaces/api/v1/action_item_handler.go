@@ -25,7 +25,7 @@ func NewActionItemHandler(db *sql.DB) *ActionItemHandler {
 // ListActionItems handles GET /api/v1/teams/:teamId/action-items
 //
 // @Summary List a team's action items
-// @Description Returns the action items belonging to the given team, newest first, optionally narrowed by status (open, in_progress, done) and/or assessment period via query parameters. Each item includes its dimension, creator, assignee, title, description, status, due date, assessment period, and timestamps, with names resolved for the linked dimension, creator, and assignee. Access requires membership on the team.
+// @Description Returns the action items belonging to the given team, newest first, optionally narrowed by status (open, in_progress, done) and/or assessment period via query parameters. Each item includes its dimension, creator, assignee, title, description, status, due date, assessment period, and timestamps, with names resolved for the linked dimension, creator, and assignee. Access requires membership on the team or manager-or-above privileges.
 // @Tags Action Items
 // @Produce json
 // @Param teamId path string true "Team ID"
@@ -34,6 +34,8 @@ func NewActionItemHandler(db *sql.DB) *ActionItemHandler {
 // @Success 200 {object} dto.ActionItemsResponse
 // @Failure 500 {object} dto.ErrorResponse "Failed to fetch/scan/read action items"
 // @Security BearerAuth
+// @Failure 401 {object} dto.ErrorResponse "Unauthorized"
+// @Failure 403 {object} dto.ErrorResponse "Access denied: team membership or manager-or-above privileges required"
 // @Router /teams/{teamId}/action-items [get]
 func (h *ActionItemHandler) ListActionItems(c *gin.Context) {
 	teamID := c.Param("teamId")
@@ -128,7 +130,7 @@ func (h *ActionItemHandler) ListActionItems(c *gin.Context) {
 // CreateActionItem handles POST /api/v1/teams/:teamId/action-items
 //
 // @Summary Create a team action item
-// @Description Creates a new action item for the given team with a title, description, and optional dimension, assignee, due date, and assessment period. New items are always created with status "open". When assignedTo is set, the target user must already be a member of the team or the request is rejected with a 400. Access requires membership on the team.
+// @Description Creates a new action item for the given team with a title, description, and optional dimension, assignee, due date, and assessment period. New items are always created with status "open". When assignedTo is set, the target user must already be a member of the team or the request is rejected with a 400. Access requires membership on the team or manager-or-above privileges.
 // @Tags Action Items
 // @Accept json
 // @Produce json
@@ -139,6 +141,7 @@ func (h *ActionItemHandler) ListActionItems(c *gin.Context) {
 // @Failure 401 {object} dto.ErrorResponse "Unauthorized"
 // @Failure 500 {object} dto.ErrorResponse "Failed to validate assignee or create action item"
 // @Security BearerAuth
+// @Failure 403 {object} dto.ErrorResponse "Access denied: team membership or manager-or-above privileges required"
 // @Router /teams/{teamId}/action-items [post]
 func (h *ActionItemHandler) CreateActionItem(c *gin.Context) {
 	teamID := c.Param("teamId")
@@ -200,7 +203,7 @@ func (h *ActionItemHandler) CreateActionItem(c *gin.Context) {
 // UpdateActionItem handles PATCH /api/v1/teams/:teamId/action-items/:id
 //
 // @Summary Update a team action item
-// @Description Partially updates the action item identified by the path ID within the given team; only the fields present in the request body are changed. Status, when provided, must be one of open, in_progress, or done. When assignedTo is set, the target user must already be a member of the team or the request is rejected with a 400. Returns a 404 if no matching item exists for that team. Access requires membership on the team.
+// @Description Partially updates the action item identified by the path ID within the given team; only the fields present in the request body are changed. Status, when provided, must be one of open, in_progress, or done. When assignedTo is set, the target user must already be a member of the team or the request is rejected with a 400. Returns a 404 if no matching item exists for that team. Access requires membership on the team or manager-or-above privileges.
 // @Tags Action Items
 // @Accept json
 // @Produce json
@@ -212,6 +215,8 @@ func (h *ActionItemHandler) CreateActionItem(c *gin.Context) {
 // @Failure 404 {object} dto.ErrorResponse "Action item not found"
 // @Failure 500 {object} dto.ErrorResponse "Failed to validate assignee or update action item"
 // @Security BearerAuth
+// @Failure 401 {object} dto.ErrorResponse "Unauthorized"
+// @Failure 403 {object} dto.ErrorResponse "Access denied: team membership or manager-or-above privileges required"
 // @Router /teams/{teamId}/action-items/{id} [patch]
 func (h *ActionItemHandler) UpdateActionItem(c *gin.Context) {
 	teamID := c.Param("teamId")
@@ -285,7 +290,7 @@ func (h *ActionItemHandler) UpdateActionItem(c *gin.Context) {
 // DeleteActionItem handles DELETE /api/v1/teams/:teamId/action-items/:id
 //
 // @Summary Delete a team action item
-// @Description Permanently deletes the action item identified by the path ID from the given team. Returns a 404 if no matching item exists for that team. Access requires membership on the team.
+// @Description Permanently deletes the action item identified by the path ID from the given team. Returns a 404 if no matching item exists for that team. Access requires membership on the team or manager-or-above privileges.
 // @Tags Action Items
 // @Produce json
 // @Param teamId path string true "Team ID"
@@ -294,6 +299,8 @@ func (h *ActionItemHandler) UpdateActionItem(c *gin.Context) {
 // @Failure 404 {object} dto.ErrorResponse "Action item not found"
 // @Failure 500 {object} dto.ErrorResponse "Failed to delete action item"
 // @Security BearerAuth
+// @Failure 401 {object} dto.ErrorResponse "Unauthorized"
+// @Failure 403 {object} dto.ErrorResponse "Access denied: team membership or manager-or-above privileges required"
 // @Router /teams/{teamId}/action-items/{id} [delete]
 func (h *ActionItemHandler) DeleteActionItem(c *gin.Context) {
 	teamID := c.Param("teamId")

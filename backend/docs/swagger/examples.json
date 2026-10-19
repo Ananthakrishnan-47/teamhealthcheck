@@ -229,7 +229,7 @@
     "userId": "demo",
     "date": "2026-09-08T10:21:33Z",
     "assessmentPeriod": "2025 - 1st Half",
-    "surveyType": "regular",
+    "surveyType": "individual",
     "completed": "true"
   },
   "HealthCheckResponseRequest": {
@@ -244,7 +244,7 @@
     "userId": "demo",
     "date": "2026-09-08T10:21:33Z",
     "assessmentPeriod": "2025 - 1st Half",
-    "surveyType": "regular",
+    "surveyType": "individual",
     "completed": "true",
     "createdAt": "2026-09-08T10:21:33Z"
   },
@@ -346,7 +346,7 @@
     "userId": "alice",
     "userName": "Alice Cooper",
     "date": "2026-09-08T10:21:33Z",
-    "surveyType": "regular"
+    "surveyType": "individual"
   },
   "IndividualDimensionResp": {
     "dimensionId": "mission",

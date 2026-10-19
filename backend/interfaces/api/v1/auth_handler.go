@@ -325,7 +325,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 // @Description Ends the caller's session. Because authentication is stateless JWT, no token is invalidated server-side; the client is expected to discard its access and refresh tokens on receiving a successful response. The endpoint still records the logout event for auditing and telemetry, and it accepts the request whether or not a valid bearer token is present.
 // @Tags Auth
 // @Produce json
-// @Success 200 {object} map[string]string "message"
+// @Success 200 {object} dto.MessageResponse
 // @Router /auth/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	ctx := c.Request.Context()

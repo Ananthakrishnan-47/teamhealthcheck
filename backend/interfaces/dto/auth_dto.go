@@ -46,3 +46,20 @@ type ResetPasswordRequest struct {
 	Token       string `json:"token" binding:"required"`
 	NewPassword string `json:"newPassword" binding:"required"`
 } //@name ResetPasswordRequest
+
+// PublicSSOConfig is the SSO block of the public app configuration.
+type PublicSSOConfig struct {
+	ClientID     string `json:"clientId"`
+	AuthorizeURL string `json:"authorizeUrl"`
+	RedirectURI  string `json:"redirectUri"`
+	Scopes       string `json:"scopes"`
+} //@name PublicSSOConfig
+
+// PublicConfigResponse is the unauthenticated app configuration served at
+// GET /config. SSO is null when OAUTH_CLIENT_ID is not set on the server.
+type PublicConfigResponse struct {
+	AppEnv      string           `json:"appEnv"`
+	CompanyName string           `json:"companyName"`
+	LogoURL     string           `json:"logoURL"`
+	SSO         *PublicSSOConfig `json:"sso"`
+} //@name PublicConfigResponse

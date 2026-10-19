@@ -22,7 +22,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns every organizational hierarchy level (e.g. VP, Director, Manager, Team Lead, Team Member), ordered from highest to lowest scope by position. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission. Each entry includes the level's identifier, display name, position, permission flags (view all teams, edit teams, manage users, take survey, view analytics), and creation/update timestamps.",
+                "description": "Returns every organizational hierarchy level (e.g. VP, Director, Manager, Team Lead, Team Member), ordered from highest to lowest scope by position. Access is restricted to authenticated users holding the Admin role (level-1 or level-admin). Each entry includes the level's identifier, display name, position, permission flags (view all teams, edit teams, manage users, take survey, view analytics), and creation/update timestamps.",
                 "produces": [
                     "application/json"
                 ],
@@ -51,7 +51,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a new organizational hierarchy level and appends it at the end of the position order, below every existing level. The level ID is auto-generated from the name (lowercased, spaces converted to hyphens) when the caller does not supply one. Permission flags for viewing teams, editing teams, managing users, taking the survey, and viewing analytics are set from the request body. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
+                "description": "Creates a new organizational hierarchy level and appends it at the end of the position order, below every existing level. The level ID is auto-generated from the name (lowercased, spaces converted to hyphens) when the caller does not supply one. Permission flags for viewing teams, editing teams, managing users, taking the survey, and viewing analytics are set from the request body. Access is restricted to authenticated users holding the Admin role (level-1 or level-admin).",
                 "consumes": [
                     "application/json"
                 ],
@@ -102,7 +102,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates the name and/or permission flags of the hierarchy level identified by the path ID. Only the fields present in the request body are changed; the level's position is left untouched. Returns a 404 if no level exists with that ID. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
+                "description": "Updates the name and/or permission flags of the hierarchy level identified by the path ID. Only the fields present in the request body are changed, and the level's position is left untouched. If permissions is supplied it replaces all five permission flags, so any flag omitted from it is set to false. Returns a 404 if no level exists with that ID. Access is restricted to authenticated users holding the Admin role (level-1 or level-admin).",
                 "consumes": [
                     "application/json"
                 ],
@@ -164,7 +164,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Deletes the hierarchy level identified by the path ID. The delete is rejected with a 409 if any users are still assigned to that level; those users must be reassigned to a different level first. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
+                "description": "Deletes the hierarchy level identified by the path ID. The delete is rejected with a 409 if any users are still assigned to that level; those users must be reassigned to a different level first. Access is restricted to authenticated users holding the Admin role (level-1 or level-admin).",
                 "produces": [
                     "application/json"
                 ],
@@ -210,7 +210,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Moves the hierarchy level identified by the path ID to the given position, shifting every level between its old and new position up or down by one so the ordering stays contiguous. The reorder runs inside a single transaction that rolls back if any step fails. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
+                "description": "Moves the hierarchy level identified by the path ID to the given position, shifting every level between its old and new position up or down by one. The requested position is not checked against the number of levels, so a position beyond the current maximum can leave a gap in the ordering. The reorder runs inside a single transaction that rolls back if any step fails. Access is restricted to authenticated users holding the Admin role (level-1 or level-admin).",
                 "consumes": [
                     "application/json"
                 ],
@@ -383,7 +383,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a new health dimension with an ID, name, and good/bad anchor descriptions. Weight must fall between 0 and 10 and defaults to 1.0 when omitted; isActive defaults to true when omitted. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
+                "description": "Creates a new health dimension with an ID, name, and good/bad anchor descriptions. Weight must fall between 0 and 10; an omitted or zero weight is replaced with 1.0, so 0 cannot be stored; isActive defaults to true when omitted. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
                 "consumes": [
                     "application/json"
                 ],
@@ -496,14 +496,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Permanently deletes the health dimension identified by the path ID. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
+                "description": "Soft-deletes the health dimension identified by the path ID by marking it inactive; the record and its response history are kept, and it no longer appears in the public dimensions list. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Admin Settings"
                 ],
-                "summary": "Delete a health dimension",
+                "summary": "Deactivate a health dimension",
                 "parameters": [
                     {
                         "type": "string",
@@ -586,7 +586,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/NotificationSettings"
+                            "$ref": "#/definitions/UpdateNotificationSettingsRequest"
                         }
                     }
                 ],
@@ -666,7 +666,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/RetentionPolicy"
+                            "$ref": "#/definitions/UpdateRetentionPolicyRequest"
                         }
                     }
                 ],
@@ -1393,7 +1393,7 @@ const docTemplate = `{
         },
         "/auth/forgot-password": {
             "post": {
-                "description": "Validates the submitted email format and, if a matching account exists, creates a password reset token and emails a reset link to it. The response message is identical whether or not the email is registered, so the endpoint cannot be used to discover which addresses have accounts. This is a public endpoint that requires no authentication.",
+                "description": "Validates the submitted email format and, if a matching local account exists, creates a password reset token and emails a reset link to it. Applies to local accounts only: SSO users are skipped (no email is sent) and must reset their password through their identity provider. The response message is identical whether or not the email is registered, so the endpoint cannot be used to discover which addresses have accounts. This is a public endpoint that requires no authentication.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1507,12 +1507,9 @@ const docTemplate = `{
                 "summary": "Log out",
                 "responses": {
                     "200": {
-                        "description": "message",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/MessageResponse"
                         }
                     }
                 }
@@ -1689,33 +1686,9 @@ const docTemplate = `{
                 "summary": "Get public app configuration",
                 "responses": {
                     "200": {
-                        "description": "appEnv, companyName, logoURL, and sso (null or {clientId, authorizeUrl, redirectUri, scopes})",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/health": {
-            "get": {
-                "description": "Returns 200 with a simple status payload. Used by tests and load balancers. Public endpoint.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Health"
-                ],
-                "summary": "Liveness check",
-                "responses": {
-                    "200": {
-                        "description": "status",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/PublicConfigResponse"
                         }
                     }
                 }
@@ -1728,7 +1701,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Records a team member's health check responses (one score, trend, and optional comment per dimension) for a team and assessment period. The submission date must not be in the future, and the assessment period, if supplied, must match one of the supported formats (e.g. \"YYYY - 1st Half\", \"YYYY Q1\", \"YYYY H1\", \"YYYY\", or \"YYYY Mon\") and must not fall in the future. On success, an email notification is sent asynchronously: an individual survey email for a regular submission, or post-workshop emails when surveyType is \"post-workshop\".",
+                "description": "Records a team member's health check responses (one score, trend, and optional comment per dimension) for a team and assessment period. The submission date must not be in the future, and the assessment period, if supplied, must match one of the supported formats (e.g. \"YYYY - 1st Half\", \"YYYY Q1\", \"YYYY H1\", \"YYYY\", or \"YYYY Mon\") and must not fall in the future. On success, an email notification is sent asynchronously: an individual survey email for an \"individual\" submission, or post-workshop emails when surveyType is \"post_workshop\".",
                 "consumes": [
                     "application/json"
                 ],
@@ -2163,7 +2136,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the action items belonging to the given team, newest first, optionally narrowed by status (open, in_progress, done) and/or assessment period via query parameters. Each item includes its dimension, creator, assignee, title, description, status, due date, assessment period, and timestamps, with names resolved for the linked dimension, creator, and assignee. Access requires membership on the team.",
+                "description": "Returns the action items belonging to the given team, newest first, optionally narrowed by status (open, in_progress, done) and/or assessment period via query parameters. Each item includes its dimension, creator, assignee, title, description, status, due date, assessment period, and timestamps, with names resolved for the linked dimension, creator, and assignee. Access requires membership on the team or manager-or-above privileges.",
                 "produces": [
                     "application/json"
                 ],
@@ -2199,6 +2172,18 @@ const docTemplate = `{
                             "$ref": "#/definitions/ActionItemsResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied: team membership or manager-or-above privileges required",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Failed to fetch/scan/read action items",
                         "schema": {
@@ -2213,7 +2198,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a new action item for the given team with a title, description, and optional dimension, assignee, due date, and assessment period. New items are always created with status \"open\". When assignedTo is set, the target user must already be a member of the team or the request is rejected with a 400. Access requires membership on the team.",
+                "description": "Creates a new action item for the given team with a title, description, and optional dimension, assignee, due date, and assessment period. New items are always created with status \"open\". When assignedTo is set, the target user must already be a member of the team or the request is rejected with a 400. Access requires membership on the team or manager-or-above privileges.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2262,6 +2247,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/ErrorResponse"
                         }
                     },
+                    "403": {
+                        "description": "Access denied: team membership or manager-or-above privileges required",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Failed to validate assignee or create action item",
                         "schema": {
@@ -2278,7 +2269,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Permanently deletes the action item identified by the path ID from the given team. Returns a 404 if no matching item exists for that team. Access requires membership on the team.",
+                "description": "Permanently deletes the action item identified by the path ID from the given team. Returns a 404 if no matching item exists for that team. Access requires membership on the team or manager-or-above privileges.",
                 "produces": [
                     "application/json"
                 ],
@@ -2312,6 +2303,18 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied: team membership or manager-or-above privileges required",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
                     "404": {
                         "description": "Action item not found",
                         "schema": {
@@ -2332,7 +2335,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Partially updates the action item identified by the path ID within the given team; only the fields present in the request body are changed. Status, when provided, must be one of open, in_progress, or done. When assignedTo is set, the target user must already be a member of the team or the request is rejected with a 400. Returns a 404 if no matching item exists for that team. Access requires membership on the team.",
+                "description": "Partially updates the action item identified by the path ID within the given team; only the fields present in the request body are changed. Status, when provided, must be one of open, in_progress, or done. When assignedTo is set, the target user must already be a member of the team or the request is rejected with a 400. Returns a 404 if no matching item exists for that team. Access requires membership on the team or manager-or-above privileges.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2380,6 +2383,18 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid request, invalid status/dueDate, or assignedTo not a team member",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied: team membership or manager-or-above privileges required",
                         "schema": {
                             "$ref": "#/definitions/ErrorResponse"
                         }
@@ -2614,7 +2629,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the given team's name, cadence, team lead ID and name, and full member list (ID, username, full name). Returns a 404 if the team does not exist. Access requires membership on the team.",
+                "description": "Returns the given team's name, cadence, team lead ID and name, and full member list (ID, username, full name). Returns a 404 if the team does not exist. Access requires membership on the team or manager-or-above privileges.",
                 "produces": [
                     "application/json"
                 ],
@@ -2666,7 +2681,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns every health check session for the given team with its full per-dimension responses, optionally narrowed to one assessment period via a query parameter, along with the total number of sessions returned. Access requires membership on the team.",
+                "description": "Returns every health check session for the given team with its full per-dimension responses, optionally narrowed to one assessment period via a query parameter, along with the total number of sessions returned. Access requires membership on the team or manager-or-above privileges.",
                 "produces": [
                     "application/json"
                 ],
@@ -2802,7 +2817,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the given user's past health check sessions, newest first, each with its team, date, assessment period, completion status, average score, response count, and the full per-dimension responses (dimension name, score, trend, comment). Results can be narrowed to one assessment period and are capped at 10 sessions by default, or by the limit query parameter. Also reports the user's total session count, unaffected by the limit. Access requires the caller to be the same user or their manager.",
+                "description": "Returns the given user's past health check sessions, newest first, each with its team, date, assessment period, completion status, average score, response count, and the full per-dimension responses (dimension name, score, trend, comment). Results can be narrowed to one assessment period and are capped at 10 sessions by default, or by the limit query parameter. Also reports the user's total session count, unaffected by the limit. Access requires the caller to be the same user, or a director (level-2) or above, or a system admin; managers (level-3) cannot view other users' history and receive a 403.",
                 "produces": [
                     "application/json"
                 ],
@@ -2840,6 +2855,18 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "User ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied: cannot access other user's data",
                         "schema": {
                             "$ref": "#/definitions/ErrorResponse"
                         }
@@ -3420,7 +3447,7 @@ const docTemplate = `{
                     "type": "array"
                 },
                 "surveyType": {
-                    "example": "regular",
+                    "example": "individual",
                     "type": "string"
                 },
                 "teamId": {
@@ -3658,7 +3685,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "surveyType": {
-                    "example": "regular",
+                    "example": "individual",
                     "type": "string"
                 },
                 "userId": {
@@ -3846,6 +3873,40 @@ const docTemplate = `{
             },
             "type": "object"
         },
+        "PublicConfigResponse": {
+            "properties": {
+                "appEnv": {
+                    "type": "string"
+                },
+                "companyName": {
+                    "type": "string"
+                },
+                "logoURL": {
+                    "type": "string"
+                },
+                "sso": {
+                    "$ref": "#/definitions/PublicSSOConfig"
+                }
+            },
+            "type": "object"
+        },
+        "PublicSSOConfig": {
+            "properties": {
+                "authorizeUrl": {
+                    "type": "string"
+                },
+                "clientId": {
+                    "type": "string"
+                },
+                "redirectUri": {
+                    "type": "string"
+                },
+                "scopes": {
+                    "type": "string"
+                }
+            },
+            "type": "object"
+        },
         "RefreshTokenRequest": {
             "properties": {
                 "refreshToken": {
@@ -3964,7 +4025,7 @@ const docTemplate = `{
                     "type": "array"
                 },
                 "surveyType": {
-                    "example": "regular",
+                    "example": "individual",
                     "type": "string"
                 },
                 "teamId": {
@@ -4545,6 +4606,28 @@ const docTemplate = `{
             "required": [
                 "newPosition"
             ],
+            "type": "object"
+        },
+        "UpdateNotificationSettingsRequest": {
+            "properties": {
+                "emailEnabled": {
+                    "type": "boolean"
+                },
+                "notifyOnSubmission": {
+                    "type": "boolean"
+                },
+                "slackEnabled": {
+                    "type": "boolean"
+                }
+            },
+            "type": "object"
+        },
+        "UpdateRetentionPolicyRequest": {
+            "properties": {
+                "keepSessionsMonths": {
+                    "type": "integer"
+                }
+            },
             "type": "object"
         },
         "UpdateSupervisorChainRequest": {

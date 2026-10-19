@@ -61,7 +61,7 @@ func (h *SettingsAdminHandler) GetDimensions(c *gin.Context) {
 // CreateDimension handles POST /api/v1/admin/settings/dimensions
 //
 // @Summary Create a health dimension
-// @Description Creates a new health dimension with an ID, name, and good/bad anchor descriptions. Weight must fall between 0 and 10 and defaults to 1.0 when omitted; isActive defaults to true when omitted. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Description Creates a new health dimension with an ID, name, and good/bad anchor descriptions. Weight must fall between 0 and 10; an omitted or zero weight is replaced with 1.0, so 0 cannot be stored; isActive defaults to true when omitted. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
 // @Tags Admin Settings
 // @Accept json
 // @Produce json
@@ -217,8 +217,8 @@ func (h *SettingsAdminHandler) UpdateDimension(c *gin.Context) {
 
 // DeleteDimension handles DELETE /api/v1/admin/settings/dimensions/:id
 //
-// @Summary Delete a health dimension
-// @Description Permanently deletes the health dimension identified by the path ID. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Summary Deactivate a health dimension
+// @Description Soft-deletes the health dimension identified by the path ID by marking it inactive; the record and its response history are kept, and it no longer appears in the public dimensions list. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
 // @Tags Admin Settings
 // @Produce json
 // @Param id path string true "Dimension ID"
@@ -337,14 +337,14 @@ func (h *SettingsAdminHandler) GetNotificationSettings(c *gin.Context) {
 // @Tags Admin Settings
 // @Accept json
 // @Produce json
-// @Param body body dto.NotificationSettings true "Notification settings"
+// @Param body body dto.UpdateNotificationSettingsRequest true "Notification settings"
 // @Success 200 {object} dto.NotificationSettings
 // @Failure 400 {object} dto.ErrorResponse "Invalid request body"
 // @Failure 500 {object} dto.ErrorResponse "Failed to save settings"
 // @Security BearerAuth
 // @Router /admin/settings/notifications [put]
 func (h *SettingsAdminHandler) UpdateNotificationSettings(c *gin.Context) {
-	var settings dto.NotificationSettings
+	var settings dto.UpdateNotificationSettingsRequest
 	if err := c.ShouldBindJSON(&settings); err != nil {
 		c.JSON(http.StatusBadRequest, dto.ErrorResponse{Error: "Invalid request body", Message: err.Error()})
 		return
@@ -355,7 +355,11 @@ func (h *SettingsAdminHandler) UpdateNotificationSettings(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, settings)
+	c.JSON(http.StatusOK, dto.NotificationSettings{
+		EmailEnabled:       settings.EmailEnabled,
+		SlackEnabled:       settings.SlackEnabled,
+		NotifyOnSubmission: settings.NotifyOnSubmission,
+	})
 }
 
 // GetRetentionPolicy handles GET /api/v1/admin/settings/retention
@@ -391,14 +395,14 @@ func (h *SettingsAdminHandler) GetRetentionPolicy(c *gin.Context) {
 // @Tags Admin Settings
 // @Accept json
 // @Produce json
-// @Param body body dto.RetentionPolicy true "Retention policy"
+// @Param body body dto.UpdateRetentionPolicyRequest true "Retention policy"
 // @Success 200 {object} dto.RetentionPolicy
 // @Failure 400 {object} dto.ErrorResponse "Invalid request body or keepSessionsMonths out of range"
 // @Failure 500 {object} dto.ErrorResponse "Failed to save retention policy"
 // @Security BearerAuth
 // @Router /admin/settings/retention [put]
 func (h *SettingsAdminHandler) UpdateRetentionPolicy(c *gin.Context) {
-	var policy dto.RetentionPolicy
+	var policy dto.UpdateRetentionPolicyRequest
 	if err := c.ShouldBindJSON(&policy); err != nil {
 		c.JSON(http.StatusBadRequest, dto.ErrorResponse{Error: "Invalid request body", Message: err.Error()})
 		return
@@ -414,7 +418,8 @@ func (h *SettingsAdminHandler) UpdateRetentionPolicy(c *gin.Context) {
 		return
 	}
 
-	policy.AnonymizeAfterDays = policy.KeepSessionsMonths * 30
-
-	c.JSON(http.StatusOK, policy)
+	c.JSON(http.StatusOK, dto.RetentionPolicy{
+		KeepSessionsMonths: policy.KeepSessionsMonths,
+		AnonymizeAfterDays: policy.KeepSessionsMonths * 30,
+	})
 }

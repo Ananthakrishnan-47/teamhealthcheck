@@ -58,7 +58,7 @@ func NewHealthCheckHandler(repository healthcheck.Repository, orgRepo organizati
 // SubmitHealthCheck handles POST /api/v1/health-checks
 //
 // @Summary Submit a health check session
-// @Description Records a team member's health check responses (one score, trend, and optional comment per dimension) for a team and assessment period. The submission date must not be in the future, and the assessment period, if supplied, must match one of the supported formats (e.g. "YYYY - 1st Half", "YYYY Q1", "YYYY H1", "YYYY", or "YYYY Mon") and must not fall in the future. On success, an email notification is sent asynchronously: an individual survey email for a regular submission, or post-workshop emails when surveyType is "post-workshop".
+// @Description Records a team member's health check responses (one score, trend, and optional comment per dimension) for a team and assessment period. The submission date must not be in the future, and the assessment period, if supplied, must match one of the supported formats (e.g. "YYYY - 1st Half", "YYYY Q1", "YYYY H1", "YYYY", or "YYYY Mon") and must not fall in the future. On success, an email notification is sent asynchronously: an individual survey email for an "individual" submission, or post-workshop emails when surveyType is "post_workshop".
 // @Tags Health Checks
 // @Accept json
 // @Produce json

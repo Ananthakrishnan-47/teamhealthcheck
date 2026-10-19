@@ -26,7 +26,7 @@ func NewPasswordResetHandler(resetService *services.PasswordResetService, userRe
 // ForgotPassword handles forgot password requests
 //
 // @Summary Request a password reset email
-// @Description Validates the submitted email format and, if a matching account exists, creates a password reset token and emails a reset link to it. The response message is identical whether or not the email is registered, so the endpoint cannot be used to discover which addresses have accounts. This is a public endpoint that requires no authentication.
+// @Description Validates the submitted email format and, if a matching local account exists, creates a password reset token and emails a reset link to it. Applies to local accounts only: SSO users are skipped (no email is sent) and must reset their password through their identity provider. The response message is identical whether or not the email is registered, so the endpoint cannot be used to discover which addresses have accounts. This is a public endpoint that requires no authentication.
 // @Tags Auth
 // @Accept json
 // @Produce json

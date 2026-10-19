@@ -370,13 +370,9 @@ func main() {
 }
 
 // healthLivenessHandler handles GET /health.
-//
-// @Summary Liveness check
-// @Description Returns 200 with a simple status payload. Used by tests and load balancers. Public endpoint.
-// @Tags Health
-// @Produce json
-// @Success 200 {object} map[string]string "status"
-// @Router /health [get]
+// Returns 200 with a simple status payload, for tests and load balancers.
+// It lives at the server root, outside the /api/v1 base path, so it is not
+// part of the generated Swagger spec.
 func healthLivenessHandler(c *gin.Context) {
 	c.JSON(200, gin.H{"status": "healthy"})
 }

@@ -30,7 +30,7 @@ func NewTeamHandler(healthCheckRepo healthcheck.Repository, teamRepo team.Reposi
 // Returns all health check sessions for a team with their responses
 //
 // @Summary List a team's health check sessions
-// @Description Returns every health check session for the given team with its full per-dimension responses, optionally narrowed to one assessment period via a query parameter, along with the total number of sessions returned. Access requires membership on the team.
+// @Description Returns every health check session for the given team with its full per-dimension responses, optionally narrowed to one assessment period via a query parameter, along with the total number of sessions returned. Access requires membership on the team or manager-or-above privileges.
 // @Tags Teams
 // @Produce json
 // @Param teamId path string true "Team ID"
@@ -96,7 +96,7 @@ func (h *TeamHandler) GetTeamSessions(c *gin.Context) {
 // Returns team details (id, name, cadence, members)
 //
 // @Summary Get team info
-// @Description Returns the given team's name, cadence, team lead ID and name, and full member list (ID, username, full name). Returns a 404 if the team does not exist. Access requires membership on the team.
+// @Description Returns the given team's name, cadence, team lead ID and name, and full member list (ID, username, full name). Returns a 404 if the team does not exist. Access requires membership on the team or manager-or-above privileges.
 // @Tags Teams
 // @Produce json
 // @Param teamId path string true "Team ID"

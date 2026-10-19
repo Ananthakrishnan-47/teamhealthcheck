@@ -78,7 +78,7 @@ func SetupProtectedUserRoutes(router *gin.Engine, db *sql.DB, jwtService *servic
 // GetUserSurveyHistory handles GET /api/v1/users/:userId/survey-history
 //
 // @Summary Get a user's survey history
-// @Description Returns the given user's past health check sessions, newest first, each with its team, date, assessment period, completion status, average score, response count, and the full per-dimension responses (dimension name, score, trend, comment). Results can be narrowed to one assessment period and are capped at 10 sessions by default, or by the limit query parameter. Also reports the user's total session count, unaffected by the limit. Access requires the caller to be the same user or their manager.
+// @Description Returns the given user's past health check sessions, newest first, each with its team, date, assessment period, completion status, average score, response count, and the full per-dimension responses (dimension name, score, trend, comment). Results can be narrowed to one assessment period and are capped at 10 sessions by default, or by the limit query parameter. Also reports the user's total session count, unaffected by the limit. Access requires the caller to be the same user, or a director (level-2) or above, or a system admin; managers (level-3) cannot view other users' history and receive a 403.
 // @Tags Users
 // @Produce json
 // @Param userId path string true "User ID"
@@ -88,6 +88,8 @@ func SetupProtectedUserRoutes(router *gin.Engine, db *sql.DB, jwtService *servic
 // @Failure 400 {object} dto.ErrorResponse "User ID is required"
 // @Failure 500 {object} dto.ErrorResponse "Database query failed or failed to parse survey history data"
 // @Security BearerAuth
+// @Failure 401 {object} dto.ErrorResponse "Unauthorized"
+// @Failure 403 {object} dto.ErrorResponse "Access denied: cannot access other user's data"
 // @Router /users/{userId}/survey-history [get]
 func (h *UserHandler) GetUserSurveyHistory(c *gin.Context) {
 	ctx := c.Request.Context()

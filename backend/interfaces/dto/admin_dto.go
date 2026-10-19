@@ -312,3 +312,18 @@ type RetentionPolicy struct {
 	ArchiveEnabled     bool `json:"archiveEnabled"`
 	AnonymizeAfterDays int  `json:"anonymizeAfterDays"`
 } //@name RetentionPolicy
+
+// UpdateNotificationSettingsRequest holds the notification settings that PUT
+// /admin/settings/notifications persists; every other NotificationSettings
+// field is derived by the server and ignored on input.
+type UpdateNotificationSettingsRequest struct {
+	EmailEnabled       bool `json:"emailEnabled"`
+	SlackEnabled       bool `json:"slackEnabled"`
+	NotifyOnSubmission bool `json:"notifyOnSubmission"`
+} //@name UpdateNotificationSettingsRequest
+
+// UpdateRetentionPolicyRequest holds the only retention field PUT
+// /admin/settings/retention persists; anonymizeAfterDays is derived.
+type UpdateRetentionPolicyRequest struct {
+	KeepSessionsMonths int `json:"keepSessionsMonths"`
+} //@name UpdateRetentionPolicyRequest

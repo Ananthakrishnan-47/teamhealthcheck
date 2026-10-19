@@ -255,14 +255,12 @@ build-backend: ## [Backend] Build Go API binary
 	@cd backend && go build -o bin/team360-api ./cmd/api/main.go
 	@echo "$(GREEN)Backend build complete: backend/bin/team360-api$(RESET)"
 
+# Keep in sync with github.com/swaggo/swag in backend/go.mod
+SWAG_VERSION := v1.16.6
+
 swagger-gen: ## [Backend] Regenerate Swagger/OpenAPI docs from annotations
 	@echo "$(CYAN)Generating Swagger docs...$(RESET)"
-	@command -v swag >/dev/null 2>&1 || { \
-		echo "$(RED)swag CLI not found. Install it with:$(RESET)"; \
-		echo "  go install github.com/swaggo/swag/cmd/swag@latest"; \
-		exit 1; \
-	}
-	@cd backend && swag init -g cmd/api/main.go -o docs/swagger --parseInternal
+	@cd backend && go run github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION) init -g cmd/api/main.go -o docs/swagger --parseInternal
 	@cd backend && go run ./cmd/swagger-examples
 	@echo "$(GREEN)Swagger docs generated: backend/docs/swagger$(RESET)"
 
