@@ -4649,9 +4649,14 @@ const docTemplate = `{
         "UpdateRetentionPolicyRequest": {
             "properties": {
                 "keepSessionsMonths": {
+                    "maximum": 120,
+                    "minimum": 1,
                     "type": "integer"
                 }
             },
+            "required": [
+                "keepSessionsMonths"
+            ],
             "type": "object"
         },
         "UpdateSupervisorChainRequest": {
