@@ -269,7 +269,7 @@ func (h *SettingsAdminHandler) GetBrandingSettings(c *gin.Context) {
 // UpdateBrandingSettings handles PUT /api/v1/admin/settings/branding
 //
 // @Summary Update branding settings
-// @Description Replaces the organization's company name and logo URL with the given values. The logo is expected as a base64 data URL and is rejected with a 400 if it exceeds roughly 500KB. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
+// @Description Replaces the organization's company name and logo URL with the given values. The logo is expected as a base64 data URL and is rejected with a 400 if it exceeds 700000 bytes (roughly 683KB). Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.
 // @Tags Admin Settings
 // @Accept json
 // @Produce json

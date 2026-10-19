@@ -303,7 +303,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Replaces the organization's company name and logo URL with the given values. The logo is expected as a base64 data URL and is rejected with a 400 if it exceeds roughly 500KB. Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
+                "description": "Replaces the organization's company name and logo URL with the given values. The logo is expected as a base64 data URL and is rejected with a 400 if it exceeds 700000 bytes (roughly 683KB). Access is restricted to authenticated users holding the Admin role with level-1 administrative permission.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1481,7 +1481,13 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Invalid credentials, SSO-only user, or token generation failed",
+                        "description": "Invalid credentials or SSO-only user",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Token generation failed",
                         "schema": {
                             "$ref": "#/definitions/ErrorResponse"
                         }
@@ -4344,7 +4350,7 @@ const docTemplate = `{
         "TeamSubmissionStatusResponse": {
             "properties": {
                 "allSubmitted": {
-                    "example": true,
+                    "example": false,
                     "type": "boolean"
                 },
                 "assessmentPeriod": {
@@ -4356,7 +4362,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "submittedMembers": {
-                    "example": 5,
+                    "example": 3,
                     "type": "integer"
                 },
                 "teamId": {

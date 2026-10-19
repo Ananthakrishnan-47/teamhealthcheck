@@ -257,7 +257,9 @@ func main() {
 	v1.SetupPasswordResetRoutes(router, passwordResetService, userRepo)
 
 	// Swagger UI - dev/staging only, disabled by default (never expose in production)
-	if os.Getenv("ENABLE_SWAGGER_UI") == "true" {
+	if os.Getenv("ENABLE_SWAGGER_UI") == "true" && os.Getenv("APP_ENV") == "production" {
+		log.Warn("ENABLE_SWAGGER_UI ignored: Swagger UI is never served when APP_ENV=production")
+	} else if os.Getenv("ENABLE_SWAGGER_UI") == "true" {
 		router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 		log.Info("Swagger UI enabled at /swagger/index.html")
 	}

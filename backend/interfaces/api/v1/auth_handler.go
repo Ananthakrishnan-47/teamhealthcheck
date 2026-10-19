@@ -42,7 +42,8 @@ func NewAuthHandler(userRepo user.Repository, orgRepo organization.Repository, j
 // @Param body body dto.LoginRequest true "Login credentials"
 // @Success 200 {object} dto.LoginResponse
 // @Failure 400 {object} dto.ErrorResponse "Missing username or password"
-// @Failure 401 {object} dto.ErrorResponse "Invalid credentials, SSO-only user, or token generation failed"
+// @Failure 401 {object} dto.ErrorResponse "Invalid credentials or SSO-only user"
+// @Failure 500 {object} dto.ErrorResponse "Token generation failed"
 // @Router /auth/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	ctx := c.Request.Context()

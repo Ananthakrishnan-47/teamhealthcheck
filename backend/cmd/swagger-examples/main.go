@@ -152,8 +152,10 @@ func coerceScalar(schemaType, raw string) (any, error) {
 		return strconv.ParseInt(raw, 10, 64)
 	case "number":
 		return strconv.ParseFloat(raw, 64)
-	default:
+	case "string":
 		return raw, nil
+	default:
+		return nil, fmt.Errorf("unsupported schema type %q for example %q", schemaType, raw)
 	}
 }
 
