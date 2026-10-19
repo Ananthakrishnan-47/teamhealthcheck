@@ -325,5 +325,5 @@ type UpdateNotificationSettingsRequest struct {
 // UpdateRetentionPolicyRequest holds the only retention field PUT
 // /admin/settings/retention persists; anonymizeAfterDays is derived.
 type UpdateRetentionPolicyRequest struct {
-	KeepSessionsMonths int `json:"keepSessionsMonths"`
+	KeepSessionsMonths int `json:"keepSessionsMonths" minimum:"1" maximum:"120"`
 } //@name UpdateRetentionPolicyRequest
