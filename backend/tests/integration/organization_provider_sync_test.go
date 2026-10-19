@@ -552,6 +552,25 @@ var _ = Describe("Integration: Organization Provider Sync", func() {
 				Expect(rows.Err()).NotTo(HaveOccurred())
 			})
 
+			It("should keep every repointed column wide enough to hold any users.id", func() {
+				var idWidth int
+				Expect(db.QueryRow(`
+					SELECT character_maximum_length FROM information_schema.columns
+					WHERE table_name = 'users' AND column_name = 'id'
+				`).Scan(&idWidth)).To(Succeed())
+
+				for _, ref := range postgres.UserIDReferenceColumns() {
+					table, column, _ := strings.Cut(ref, ".")
+					var width int
+					Expect(db.QueryRow(`
+						SELECT character_maximum_length FROM information_schema.columns
+						WHERE table_name = $1 AND column_name = $2
+					`, table, column).Scan(&width)).To(Succeed(), ref)
+					Expect(width).To(BeNumerically(">=", idWidth),
+						"%s is narrower than users.id, so re-keying to a long provider id would fail", ref)
+				}
+			})
+
 			It("should refuse to guess when the email and username match two different rows", func() {
 				insertUser("alice-by-email", "someoneelse", "syncalice@test.com", "sso")
 				insertUser("alice-by-username", "syncalice", "other@test.com", "sso")
