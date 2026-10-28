@@ -727,10 +727,18 @@ var _ = Describe("E2E: Admin Dashboard Management", Label("e2e", "admin"), func(
 				By("Waiting for users list to load")
 				time.Sleep(2 * time.Second) // Allow time for API call to complete
 
-				// The list is paginated and sorted by username, so on a database
-				// populated by earlier specs the new user is not on page 1.
-				By("Searching for the test user")
-				Expect(page.Locator("[data-testid='user-search-input']").Fill(testUsername)).To(Succeed())
+				// The users list is paginated (25/page, sorted by username), and the
+				// seed/demo data plus other tests' leftover users can easily push a
+				// freshly-inserted row off page 1. Search by the unique username so
+				// the row is found regardless of its position in the full list.
+				By("Searching for the test user by username")
+				searchInput := page.Locator("[data-testid='user-search-input']")
+				Eventually(func() bool {
+					visible, _ := searchInput.IsVisible()
+					return visible
+				}, 10*time.Second, 500*time.Millisecond).Should(BeTrue())
+				err = searchInput.Fill(testUsername)
+				Expect(err).NotTo(HaveOccurred())
 
 				// Wait for the specific test user to appear in the list
 				By("Waiting for test user to appear in list")
@@ -859,10 +867,18 @@ var _ = Describe("E2E: Admin Dashboard Management", Label("e2e", "admin"), func(
 				By("Waiting for users list to load")
 				time.Sleep(2 * time.Second) // Allow time for API call to complete
 
-				// The list is paginated and sorted by username, so on a database
-				// populated by earlier specs the new user is not on page 1.
-				By("Searching for the test user")
-				Expect(page.Locator("[data-testid='user-search-input']").Fill(testUsername)).To(Succeed())
+				// The users list is paginated (25/page, sorted by username), and the
+				// seed/demo data plus other tests' leftover users can easily push a
+				// freshly-inserted row off page 1. Search by the unique username so
+				// the row is found regardless of its position in the full list.
+				By("Searching for the test user by username")
+				searchInput := page.Locator("[data-testid='user-search-input']")
+				Eventually(func() bool {
+					visible, _ := searchInput.IsVisible()
+					return visible
+				}, 10*time.Second, 500*time.Millisecond).Should(BeTrue())
+				err = searchInput.Fill(testUsername)
+				Expect(err).NotTo(HaveOccurred())
 
 				// Wait for the specific test user to appear in the list
 				By("Waiting for test user to appear in list")
